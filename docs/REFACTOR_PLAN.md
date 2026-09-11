@@ -1,450 +1,209 @@
-# Kế hoạch tái cấu trúc hạ tầng k3s + ArgoCD
+# Kế hoạch xây dựng hạ tầng k3s + ArgoCD
 
 | | |
 |---|---|
 | **Trạng thái** | Bản nháp, chờ duyệt |
 | **Ngày** | 11/09/2026 |
-| **Phạm vi** | Toàn bộ `infra/argocd/**` và `infra/helm/**` |
-| **Tài liệu liên quan** | [Kế hoạch backend Platform API](./PLATFORM_API_PLAN.md) · [Thiết kế quản lý secret](./SECRET_MANAGEMENT.md) |
+| **Bối cảnh** | Xây **mới hoàn toàn** trên server mới + repo GitHub mới. Không migrate dữ liệu cũ. |
+| **Quy mô đội** | 3 người vận hành |
+| **Cơ sở** | [RESEARCH_BEST_PRACTICES.md](./RESEARCH_BEST_PRACTICES.md) |
+| **Liên quan** | [PLATFORM_API_PLAN.md](./PLATFORM_API_PLAN.md) · [SECRET_MANAGEMENT.md](./SECRET_MANAGEMENT.md) |
 
 ---
 
-## Tóm tắt cho người bận
+## Những gì đã thay đổi so với bản trước
 
-Repo hiện tại có 3 vấn đề gốc:
+Bản này viết lại hoàn toàn dựa trên 3 thông tin mới từ bạn:
 
-1. **Mọi thứ đều phải copy tay.** Thêm một khách hàng mới phải tạo 6–8 file, trong đó 2 file ArgoCD giống hệt nhau chỉ khác 5 dòng. Copy tay thì sớm muộn cũng sót — và thực tế đã sót: **production hiện không có monitoring**.
-2. **Chart viết lại từ đầu cho từng service.** 11 chart, mỗi chart tự viết `_helpers.tpl`, `service.yaml`, `namespace.yaml` gần như giống hệt nhau. Sửa một quy ước phải sửa 11 chỗ.
-3. **Cluster chứa thứ không có trong Git.** Outline, gitlab-runner, coredns-ha đang chạy nhưng không có ArgoCD Application. Secret thì apply tay hoàn toàn. Cluster chết là mất.
+| Thay đổi | Hệ quả |
+|---|---|
+| **Xây mới, không migrate** | Bỏ toàn bộ phần backup/baseline/cutover. Rủi ro lớn nhất của bản trước (ArgoCD xoá mất workload khi chuyển đổi) **biến mất hoàn toàn**. |
+| **Chỉ 3 người vận hành** | Cắt mọi thứ mang tính "tổ chức lớn": 4 vai trò → 2, 6 AppProject → 2, bỏ sync window, bỏ NetworkPolicy, bỏ HA. |
+| **1 branch `main`** (theo research) | Bỏ được Helm chart bootstrap phức tạp. Promote được **từng service một**. |
+| **GitHub thay GitLab** | GitHub Actions thay GitLab CI. PR thay MR. Dùng auto-merge + CODEOWNERS thay vì token bypass. |
 
-Hướng giải quyết:
-
-- **Khai báo một lần, sinh ra nhiều lần.** Mỗi service có đúng 1 file khai báo. ArgoCD `ApplicationSet` tự sinh ra Application cho mọi môi trường. 24 file Application biến mất.
-- **Chart dùng chung.** 1 library chart + 2 chart tổng quát thay cho 11 chart riêng. Service mới chỉ cần viết values.
-- **Mọi thứ vào Git, kể cả secret** (mã hoá bằng Sealed Secrets).
-- **Có CI chặn lỗi trước khi vào cluster.**
-
-Sau đó xây backend API để thao tác toàn bộ quy trình này qua HTTP — bạn dựng UI lên trên.
+Kết quả: kế hoạch ngắn hơn, ít bước hơn, và **6 tuần thay vì 11 tuần**.
 
 ---
 
 ## Mục lục
 
-- [Phần 1 — Hiện trạng](#phần-1--hiện-trạng)
-- [Phần 2 — Nguyên tắc thiết kế](#phần-2--nguyên-tắc-thiết-kế)
-- [Phần 3 — Mô hình 2 branch](#phần-3--mô-hình-2-branch-develop--main)
-- [Phần 4 — Cấu trúc thư mục mới](#phần-4--cấu-trúc-thư-mục-mới)
-- [Phần 5 — Service Registry + ApplicationSet](#phần-5--service-registry--applicationset)
-- [Phần 6 — Library chart và chart tổng quát](#phần-6--library-chart-và-chart-tổng-quát)
-- [Phần 7 — Secret](#phần-7--secret)
-- [Phần 8 — Tự động cập nhật image tag](#phần-8--tự-động-cập-nhật-image-tag)
-- [Phần 9 — AppProject và phân quyền](#phần-9--appproject-và-phân-quyền)
-- [Phần 10 — CI kiểm tra](#phần-10--ci-kiểm-tra)
-- [Phần 11 — Lưu trữ và backup](#phần-11--lưu-trữ-và-backup)
-- [Phần 12 — Lộ trình](#phần-12--lộ-trình)
-- [Phần 13 — Rủi ro](#phần-13--rủi-ro)
-- [Phần 14 — Việc làm ngay được](#phần-14--việc-làm-ngay-được)
-- [Phụ lục](#phụ-lục-a--ánh-xạ-file-cũ-sang-mới)
+- [1. Bảy quyết định nền tảng](#1-bảy-quyết-định-nền-tảng)
+- [2. Kiến trúc tổng quan](#2-kiến-trúc-tổng-quan)
+- [3. Cấu trúc repo](#3-cấu-trúc-repo)
+- [4. Registry + ApplicationSet](#4-registry--applicationset)
+- [5. Library chart](#5-library-chart)
+- [6. Môi trường và promotion](#6-môi-trường-và-promotion)
+- [7. Secret](#7-secret)
+- [8. AppProject](#8-appproject)
+- [9. CI trên GitHub Actions](#9-ci-trên-github-actions)
+- [10. Cluster và lưu trữ](#10-cluster-và-lưu-trữ)
+- [11. Lộ trình 6 tuần](#11-lộ-trình-6-tuần)
+- [12. Những gì cố tình KHÔNG làm](#12-những-gì-cố-tình-không-làm)
+- [13. Rủi ro](#13-rủi-ro)
 
 ---
 
-## Phần 1 — Hiện trạng
+## 1. Bảy quyết định nền tảng
 
-### 1.1. Con số
-
-| Hạng mục | Hiện tại |
-|---|---|
-| File ArgoCD `Application` | 24 (12 cặp dev/prod gần như y hệt) |
-| Số dòng trong `apps/**` | ~745 |
-| Số dòng Helm template | ~2.713 |
-| Số dòng Helm values | ~2.170 |
-| Chart tự viết | 11 |
-| File phải tạo khi thêm 1 khách hàng | 6–8 |
-| File CI | 0 |
-| Cơ chế quản lý secret | Không có |
-
-### 1.2. Lỗi đang có trên production
-
-#### 🔴 Lỗi 1 — Production không có monitoring
-
-Đếm file:
-
-```
-apps/dev/platform/   → 10 Application
-apps/prod/platform/  →  7 Application
-```
-
-Prod đang thiếu 3 cái:
-
-| File thiếu | Hậu quả |
-|---|---|
-| `monitoring.yaml` | **Prod không có Prometheus, Grafana, alerting.** Sự cố xảy ra thì không ai biết cho tới khi khách hàng gọi. |
-| `storage-postgres.yaml` | Không quản lý qua GitOps |
-| `storage-redis.yaml` | Không quản lý qua GitOps |
-
-Đây không phải quyết định thiết kế. Đây là hệ quả trực tiếp của việc `apps/dev/` và `apps/prod/` là **hai thư mục riêng biệt**: ai đó thêm file vào dev rồi quên prod, và không có gì phát hiện ra.
-
-#### 🔴 Lỗi 2 — Có service chạy ngoài GitOps
-
-`ARCHITECTURE.md` ghi Outline đang chạy ở namespace `admin-workspace-dev`. Nhưng tìm khắp `infra/argocd/apps/**` không có Application nào cho Outline. Tương tự `gitlab-runner` và `coredns-ha`: có chart trong repo, không có Application.
-
-Nghĩa là những service này **chỉ tồn tại trong cluster**. Không ai biết chính xác chúng được deploy bằng lệnh gì, với values nào. Cluster chết là dựng lại bằng trí nhớ.
-
-#### 🔴 Lỗi 3 — Tất cả khách hàng dùng chung một imagePullSecret sai tên
-
-```
-biboo-clinic/values-dev.yaml:41:    - name: lotus-clinic-registry
-giaan-clinic/values-dev.yaml:53:    - name: lotus-clinic-registry
-hocmon-clinic/values-dev.yaml:41:   - name: lotus-clinic-registry
-lotus-clinic/values-dev.yaml:41:    - name: lotus-clinic-registry
-```
-
-Cả 4 khách hàng đều trỏ vào `lotus-clinic-registry`. Chỉ có 2 khả năng, và cả hai đều cần sửa:
-
-- Đây là secret dùng chung nhưng bị đặt tên theo một khách hàng cụ thể → gây hiểu nhầm, cần đổi tên thành `gitlab-registry`
-- Hoặc 3 khách hàng đang pull image bằng credential của khách hàng khác → sai về phân quyền
-
-#### 🟠 Lỗi 4 — dev và prod trỏ vào repo bằng 2 giao thức khác nhau
-
-```
-dev:   git@gitlab.com:hnq-tech/hnq-infra.git      (SSH)
-prod:  https://gitlab.com/hnq-tech/hnq-infra.git  (HTTPS)
-```
-
-ArgoCD coi đây là **hai repository khác nhau**. Nghĩa là hai bộ credential, hai cache ở repo-server. Hôm nào đổi credential mà chỉ nhớ một bên thì nửa hệ thống ngừng sync, và triệu chứng sẽ rất khó hiểu.
-
-#### 🟠 Lỗi 5 — Từng có sự cố 30 giờ vì helm thủ công chạy song song ArgoCD
-
-File `infra/helm/monitoring/issues.md` trong repo ghi lại sự cố ngày 18/06/2026:
-
-> Hai helm release chạy song song trong namespace `monitoring` → hai DaemonSet node-exporter cùng dùng `hostNetwork: true` port 9100 → xung đột → DaemonSet mới Pending 30 giờ → Prometheus không lấy được kubelet metrics.
-
-Nguyên nhân gốc: không có ranh giới rõ ràng giữa "cái gì ArgoCD quản" và "cái gì apply tay". Đây chính là lý do nguyên tắc **Git là nguồn sự thật duy nhất** phải được áp dụng triệt để, không có ngoại lệ.
-
-### 1.3. Nợ kỹ thuật
-
-#### 24 file Application chỉ khác nhau 5 dòng
-
-Diff giữa **mọi** cặp dev/prod đều đúng khuôn này:
-
-```diff
--  name: lotus-clinic-dev                            +  name: lotus-clinic-prod
--  repoURL: git@gitlab.com:hnq-tech/hnq-infra.git    +  repoURL: https://gitlab.com/...
--  targetRevision: develop                           +  targetRevision: main
--  - lotus-clinic/values-dev.yaml                    +  - lotus-clinic/values-prod.yaml
--  namespace: lotus-clinic-dev                       +  namespace: lotus-clinic-prod
-```
-
-Không có gì khác. 745 dòng YAML để diễn đạt 5 biến số.
-
-#### Values của khách hàng trùng nhau ~90%
-
-File `values-dev.yaml` của lotus dài ~60 dòng. So với giaan, chỉ khác 6 chỗ (tên, host, tên secret, đường dẫn config, resources, tolerations). 54 dòng còn lại giống hệt.
-
-Và đã có dấu hiệu copy sót: `giaan-clinic/values-dev.yaml` để `tolerations: []` trong khi 3 khách hàng kia đều có toleration cho control-plane. Không rõ cố ý hay quên.
-
-#### Chart nào cũng viết lại từ đầu
-
-`mariadb/_helpers.tpl` và `postgres/_helpers.tpl` khác nhau **đúng một chuỗi** — `mariadb` đổi thành `postgres`:
-
-```diff
-- {{- define "mariadb.fullname" -}}      + {{- define "postgres.fullname" -}}
-- {{- define "mariadb.labels" -}}        + {{- define "postgres.labels" -}}
-- {{- define "mariadb.secretName" -}}    + {{- define "postgres.secretName" -}}
-```
-
-Chuyện này lặp lại với `namespace.yaml`, `service.yaml`, `nodeport-service.yaml`, `secret.yaml` trên 5 chart storage. Muốn đổi quy ước label? Sửa 11 chỗ.
-
-#### Namespace bị tạo 2 lần
-
-Chart có `templates/namespace.yaml`, đồng thời Application có `syncOptions: CreateNamespace=true`. Hai cơ chế cùng sở hữu một resource. Khi prune sẽ tranh chấp, và namespace không nhận được label thống nhất.
-
-#### Image tag ghi cứng trong values
-
-```yaml
-image: registry.gitlab.com/hnq-tech/clients/lotus-clinic/lotus-backend:6aebe241
-```
-
-Mỗi lần deploy phải mở file, sửa tag, commit, push bằng tay. Không có liên kết tự động giữa CI build image và GitOps.
-
-#### Không có CI
-
-Không có `.gitlab-ci.yml`. Không `helm lint`, không kiểm tra schema, không policy. YAML sai cú pháp hoặc thiếu resource limit đi thẳng vào cluster, chỉ biết khi ArgoCD báo lỗi.
-
-#### hostPath với 3 quy ước đường dẫn khác nhau
-
-| Nơi khai báo | Đường dẫn |
-|---|---|
-| `values-dev.yaml` | `/data/k3s/dev/platform/storage/...` |
-| `values-prod.yaml` | `/home/hnq/hnq_data/prod/platform/storage/...` |
-| `README.md` (tài liệu chính thức) | `/home/server01/srv/envs/<env>/data/...` |
-
-Cộng thêm `nodeSelector: kubernetes.io/hostname: server02` ghim pod vào một node cụ thể. Node chết → pod không chuyển sang node khác được, data cũng không truy cập được.
-
-#### Tài liệu lệch thực tế
-
-- `README.md` mô tả cấu trúc `envs/` với apps, config, data, logs, backup — **thư mục này không tồn tại trong repo**. Nó mô tả layout trên server, bị đặt nhầm chỗ.
-- `README.md` mô tả `infra/ci/` với 4 script — cũng không tồn tại.
-- `ARCHITECTURE.md` liệt kê 3 node: `hnq-server-vietnix-01-hjnu`, `hnq`, `server01`. Nhưng values dev ghim vào `server02` — node không có trong tài liệu.
-
-#### Mọi Application dùng `project: default`
-
-Không có ranh giới phân quyền nào. Về mặt kỹ thuật, một chart của khách hàng có thể tạo `ClusterRole` hoặc deploy vào `kube-system`.
-
-#### File rác
-
-`hnq_svc.json` ở thư mục gốc là output rỗng của `kubectl get -o json`: `{"items": []}`.
-
----
-
-## Phần 2 — Nguyên tắc thiết kế
-
-Bảy nguyên tắc dưới đây là cơ sở cho mọi quyết định trong tài liệu này.
-
-| # | Nguyên tắc | Nghĩa là gì trong thực tế |
+| # | Quyết định | Lý do |
 |---|---|---|
-| **P1** | Git là nguồn sự thật duy nhất | Không `kubectl apply` tay, không `helm install` tay. Kể cả backend API cũng phải ghi vào Git chứ không ghi thẳng vào cluster. |
-| **P2** | Khai báo một lần, sinh ra nhiều lần | Một file khai báo service → ArgoCD tự sinh Application cho mọi môi trường. Không bao giờ copy file giữa dev và prod. |
-| **P3** | Môi trường là tham số, không phải bản sao | dev và prod khác nhau bằng file override nhỏ, không phải bằng hai cây thư mục song song. |
-| **P4** | Chart dùng chung, values riêng | Logic template nằm ở library chart. Thêm service mới chỉ viết values, không viết template. |
-| **P5** | Schema là hợp đồng | Mỗi khai báo service có JSON Schema. Schema đó vừa dùng validate trong CI, vừa sinh form cho UI. Một nguồn, không lệch. |
-| **P6** | Không gì vào cluster mà không qua CI | Lint, render, kiểm tra schema, policy — tất cả chạy trước khi merge. |
-| **P7** | Quay lui = `git revert` | Không có trạng thái nào chỉ tồn tại trong cluster mà không có trong Git. |
+| **Q1** | **Một branch `main` duy nhất.** Môi trường tách bằng thư mục và file values. | Branch-per-environment là anti-pattern được cộng đồng nêu tên. Quan trọng hơn: với 1 branch bạn **promote được từng service một**; với 2 branch thì merge là đưa tất cả. ([Research §1](./RESEARCH_BEST_PRACTICES.md#1--tách-môi-trường-branch-hay-thư-mục)) |
+| **Q2** | **Mọi thay đổi đều qua Pull Request.** PR chỉ đổi image tag ở dev thì tự merge khi CI xanh. | Uniform, dễ hiểu, có audit đầy đủ. Không cần token bypass protected branch. |
+| **Q3** | **ApplicationSet cho service của mình, App-of-Apps cho chart bên thứ ba.** | Đúng phân vai cộng đồng khuyến nghị: factory cho cái lặp lại, danh sách tường minh cho cái cố định. ([Research §2](./RESEARCH_BEST_PRACTICES.md#2--app-of-apps-hay-applicationset)) |
+| **Q4** | **Sealed Secrets.** | Rào cản thấp nhất, không cần hệ thống ngoài. Lộ trình chuẩn là bắt đầu ở đây. ([Research §5](./RESEARCH_BEST_PRACTICES.md#5--secret)) |
+| **Q5** | **Prod: `selfHeal: true`, `prune: false`.** Dev: cả hai `true`. | `selfHeal` chống chỉnh tay vào cluster. `prune: false` ở prod để một lỗi ApplicationSet không xoá hàng loạt. ([Research §3](./RESEARCH_BEST_PRACTICES.md#3--chính-sách-sync)) |
+| **Q6** | **Node chọn bằng label, không bằng hostname.** | Server mới = cơ hội làm đúng. Đổi node không phải sửa values. |
+| **Q7** | **Platform API là tuỳ chọn, làm sau cùng.** Bắt buộc chỉ có `make new-service`. | Với 3 người, script CLI giải quyết 80% nhu cầu. Chỉ xây API khi thấy đau thật. |
+
+### Năm nguyên tắc
+
+| # | Nguyên tắc | Trong thực tế |
+|---|---|---|
+| **P1** | Git là nguồn sự thật duy nhất | Không `kubectl apply` tay, không `helm install` tay. Kể cả tự động hoá cũng ghi vào Git. |
+| **P2** | Khai báo một lần, sinh ra nhiều lần | Một file khai báo service → ArgoCD tự sinh Application cho mọi môi trường. |
+| **P3** | Chart chung, values riêng | Service mới chỉ viết values, không viết template. |
+| **P4** | Schema là hợp đồng | Một JSON Schema dùng cho cả CI lẫn form UI sau này. |
+| **P5** | Đơn giản hơn là tốt hơn | Với 3 người, mỗi lớp trừu tượng phải tự trả giá được. Xem [Phần 12](#12-những-gì-cố-tình-không-làm). |
 
 ---
 
-## Phần 3 — Mô hình 2 branch: `develop` → `main`
-
-Bạn đã chốt giữ 2 branch để test ở dev trước rồi mới lên prod. Đây là mô hình đúng, nhưng cần thiết kế cẩn thận để không lặp lại Lỗi 1 (prod thiếu app).
-
-### 3.1. Vì sao Lỗi 1 xảy ra — và vì sao nó sẽ không tái diễn
-
-Điều quan trọng cần hiểu: **Lỗi 1 không phải do có 2 branch.** Nó xảy ra vì `apps/dev/` và `apps/prod/` là **hai thư mục riêng biệt trong cùng một branch**. Thêm file vào thư mục này không hề liên quan gì tới thư mục kia, và Git cũng không có lý do gì để báo.
-
-Ở cấu trúc mới, dev và prod dùng **chung một thư mục `registry/`**. Sự khác biệt duy nhất là branch nào đang được ArgoCD đọc. Kèm theo một quy tắc:
-
-> **`main` chỉ nhận thay đổi qua merge từ `develop`. Không bao giờ commit thẳng vào `main`.**
-
-Hệ quả: mọi thứ có ở dev thì **chắc chắn** sẽ có ở prod sau khi merge. Câu hỏi duy nhất còn lại là *khi nào*, và cái đó thì nhìn thấy được (xem mục 3.4).
+## 2. Kiến trúc tổng quan
 
 ```mermaid
-flowchart LR
-  subgraph Cu["❌ Cũ — 2 thư mục, cùng 1 branch"]
-    direction TB
-    D1["apps/dev/platform/<br/>10 file"]
-    P1["apps/prod/platform/<br/>7 file"]
-    D1 -.->|"copy tay<br/>quên là mất"| P1
+flowchart TB
+  subgraph Dev["Lập trình viên (3 người)"]
+    ENG[Engineer]
+    CLI["make new-service"]
   end
 
-  subgraph Moi["✅ Mới — 1 thư mục, 2 branch"]
-    direction TB
-    R1["registry/<br/>(trên develop)"]
-    R2["registry/<br/>(trên main)"]
-    R1 -->|"git merge<br/>không thể sót"| R2
+  subgraph GH["GitHub — nguồn sự thật"]
+    REG["registry/apps/**<br/>khai báo service"]
+    CH["charts/**<br/>library + 2 chart chung"]
+    ENVD["env/dev.yaml<br/>env/prod.yaml"]
+    GOPS["gitops/**<br/>AppProject + ApplicationSet"]
+    SEC["secrets/**<br/>SealedSecret đã mã hoá"]
   end
+
+  subgraph CI["GitHub Actions"]
+    V["lint · render · kubeconform<br/>conftest · gitleaks · trivy"]
+    AM["auto-merge<br/>(chỉ PR bump tag dev)"]
+  end
+
+  subgraph K["k3s cluster"]
+    AS[ApplicationSet Controller]
+    APP["Applications<br/>tự sinh"]
+    SSC[Sealed Secrets Controller]
+    WL["Workload<br/>*-dev · *-prod"]
+  end
+
+  ENG --> CLI --> GH
+  ENG -->|PR| GH
+  GH --> CI
+  V --> AM --> GH
+
+  REG & GOPS --> AS --> APP --> WL
+  CH & ENVD --> APP
+  SEC --> SSC --> WL
 ```
 
-### 3.2. Luồng làm việc
-
-```mermaid
-sequenceDiagram
-  participant Dev as Lập trình viên
-  participant DB as branch develop
-  participant AD as ArgoCD (dev)
-  participant MB as branch main
-  participant AP as ArgoCD (prod)
-
-  Note over Dev,AD: 1. Phát triển và test ở dev
-  Dev->>DB: commit thay đổi
-  DB->>AD: webhook
-  AD->>AD: sync môi trường dev
-  Dev->>AD: kiểm tra, test
-
-  Note over Dev,AP: 2. Đưa lên prod
-  Dev->>MB: mở MR develop → main
-  Note over MB: CI chạy đủ bộ kiểm tra<br/>Reviewer duyệt
-  Dev->>MB: merge
-  MB->>AP: webhook
-  AP->>AP: sync môi trường prod
-```
-
-### 3.3. Bảng quy tắc branch
-
-| | `develop` | `main` |
-|---|---|---|
-| Môi trường | dev | prod |
-| ArgoCD root app | `apps-dev` | `apps-prod` |
-| Ai được commit thẳng | CI (bump image tag dev) + lập trình viên | **Không ai** |
-| Cách thay đổi | Commit trực tiếp hoặc MR | **Chỉ merge từ `develop`** |
-| Bảo vệ branch trên GitLab | Cho phép push | Protected: chỉ MR từ `develop`, bắt buộc ≥1 approval, bắt buộc CI xanh |
-| Auto-sync của ArgoCD | Bật, có `selfHeal` | Bật `selfHeal`, nhưng chỉ nhận thay đổi đã qua MR |
-
-### 3.4. Theo dõi "hàng chờ lên prod"
-
-Vì `main` đi sau `develop`, cần nhìn thấy khoảng cách đó. Hai cách:
-
-**Cách 1 — Job CI chạy hằng ngày**, đăng vào kênh chat:
-
-```bash
-# ci/scripts/promotion-status.sh
-git fetch origin develop main
-echo "Các commit đang chờ lên prod:"
-git log --oneline origin/main..origin/develop
-
-echo
-echo "Các service có ở dev nhưng chưa bật prod:"
-for f in $(git ls-tree -r --name-only origin/develop -- 'registry/*/*/service.yaml'); do
-  name=$(basename $(dirname "$f"))
-  git show "origin/develop:$f" | yq -e '.spec.environments[] | select(.env=="prod")' >/dev/null 2>&1 \
-    || echo "  - $name (chưa khai báo môi trường prod)"
-done
-```
-
-**Cách 2 — Endpoint `GET /api/v1/promotions`** của Platform API (xem [PLATFORM_API_PLAN.md](./PLATFORM_API_PLAN.md)), hiển thị ngay trên UI: service nào đang ở dev bao lâu rồi mà chưa lên prod.
-
-### 3.5. Một chi tiết kỹ thuật quan trọng
-
-ApplicationSet cần biết nó đang đọc branch nào (`develop` hay `main`). Nhưng file ApplicationSet nằm trong repo và **giống hệt nhau trên cả hai branch** — không thể ghi cứng `targetRevision`.
-
-Cách giải quyết: biến `gitops/bootstrap/` thành một **Helm chart**, trong đó ApplicationSet là template và `targetRevision` là tham số:
-
-```text
-gitops/bootstrap/
-├── Chart.yaml
-├── values.yaml
-├── values-dev.yaml       # env: dev,  targetRevision: develop
-├── values-prod.yaml      # env: prod, targetRevision: main
-└── templates/
-    ├── project-tenants.yaml
-    ├── project-platform.yaml
-    ├── project-admin.yaml
-    ├── appset-tenants.yaml
-    ├── appset-platform.yaml
-    └── appset-vendor.yaml
-```
-
-Nhờ đó, **cả hệ thống chỉ còn 2 file phải apply bằng tay**, và chỉ apply đúng một lần:
-
-```bash
-kubectl -n argocd apply -f gitops/root/dev.yaml
-kubectl -n argocd apply -f gitops/root/prod.yaml
-```
-
-> ⚠️ **Cảnh báo cú pháp:** Helm và ApplicationSet đều dùng `{{ }}`. Khi viết ApplicationSet bên trong một Helm chart, phải escape phần của ApplicationSet bằng backtick:
->
-> ```yaml
-> name: {{ `{{ .metadata.name }}` }}-{{ .Values.env }}
-> #      ↑ ApplicationSet xử lý lúc sync    ↑ Helm xử lý lúc render
-> ```
->
-> Quên escape là ApplicationSet nhận được chuỗi rỗng. Lỗi này rất hay gặp và triệu chứng khó đoán — CI phải có bước `helm template` để bắt.
+Một luồng, không nhánh rẽ. Với 3 người thì đây là điểm quan trọng nhất: **ai cũng hiểu được toàn bộ hệ thống trong một buổi chiều.**
 
 ---
 
-## Phần 4 — Cấu trúc thư mục mới
+## 3. Cấu trúc repo
 
 ```text
-HNQ-Infra/
+HNQ-Infra/                          (GitHub, branch main duy nhất)
 │
-├── registry/                    ⭐ NƠI DUY NHẤT phải sửa khi thêm service
+├── registry/                 ⭐ NƠI DUY NHẤT sửa khi thêm service
 │   ├── schema/
-│   │   └── service.schema.json         # JSON Schema — vừa validate CI, vừa sinh form UI
-│   ├── tenants/                        # Khách hàng
-│   │   ├── lotus-clinic/
-│   │   │   ├── service.yaml            # Khai báo: chart nào, chủ sở hữu, bật env nào
-│   │   │   ├── values-dev.yaml         # Chỉ ghi phần KHÁC mặc định
-│   │   │   ├── values-prod.yaml
-│   │   │   └── config/                 # File config của app
-│   │   ├── giaan-clinic/
-│   │   ├── biboo-clinic/
-│   │   └── hocmon-clinic/
-│   └── platform/                       # Service nền tảng
+│   │   └── service.schema.json     # validate CI + sinh form UI sau này
+│   └── apps/
+│       ├── lotus-clinic/
+│       │   ├── service.yaml        # chart nào, bật env nào, cần secret gì
+│       │   ├── values-dev.yaml     # chỉ ghi phần KHÁC mặc định
+│       │   ├── values-prod.yaml
+│       │   └── config/             # file config mount vào ConfigMap
+│       ├── giaan-clinic/
+│       ├── biboo-clinic/
+│       ├── hocmon-clinic/
+│       ├── push-notify/
 │       ├── storage-mariadb/
 │       ├── storage-postgres/
 │       ├── storage-redis/
 │       ├── storage-minio/
 │       ├── storage-opensearch/
-│       ├── push-notify/
-│       ├── push-notify-v2/
-│       ├── monitoring/
-│       ├── outline/                    # ← kéo về GitOps
-│       ├── gitlab-runner/              # ← kéo về GitOps
-│       ├── server-control/
-│       └── platform-api/               # ← backend mới
+│       └── outline/
 │
-├── charts/                      ⭐ Hiếm khi phải sửa
-│   ├── library/
-│   │   └── hnq-common/                 # library chart: labels, service, ingress, probes...
-│   ├── apps/
-│   │   ├── webservice/                 # chart chung cho mọi HTTP service
-│   │   └── datastore/                  # chart chung cho datastore
-│   └── vendor/                         # bọc chart của bên thứ ba
-│       ├── argo-cd/
-│       ├── kube-prometheus-stack/
-│       └── gitlab-runner/
+├── charts/                   ⭐ Hiếm khi sửa — 3 chart cho toàn hệ thống
+│   ├── hnq-common/                 # library chart
+│   ├── webservice/                 # mọi HTTP service
+│   └── datastore/                  # mọi datastore một node
 │
-├── env/                         ⭐ Khác biệt giữa dev và prod
-│   ├── dev/defaults.yaml               # nodeSelector, issuer, resources nhỏ...
-│   └── prod/defaults.yaml
+├── env/                      ⭐ Khác biệt dev ↔ prod
+│   ├── dev.yaml
+│   └── prod.yaml
 │
 ├── gitops/
-│   ├── root/
-│   │   ├── dev.yaml                    # 1 trong 2 file apply tay
-│   │   └── prod.yaml                   # file còn lại
-│   ├── bootstrap/                      # Helm chart sinh AppProject + ApplicationSet
-│   │   ├── values-dev.yaml
-│   │   ├── values-prod.yaml
-│   │   └── templates/
-│   └── manifests/                      # YAML thuần (ClusterIssuer, HelmChartConfig)
+│   ├── root.yaml                   # ⭐ FILE DUY NHẤT apply tay, đúng 1 lần
+│   └── bootstrap/
+│       ├── project-platform.yaml
+│       ├── project-apps.yaml
+│       ├── appset-apps.yaml        # sinh Application cho registry/apps/*
+│       ├── app-cert-manager.yaml   # ↓ chart bên thứ ba, danh sách tường minh
+│       ├── app-sealed-secrets.yaml
+│       ├── app-monitoring.yaml
+│       ├── app-traefik-config.yaml
+│       └── app-velero.yaml
 │
-├── secrets/                     # SealedSecret — đã mã hoá, an toàn để commit
-│   ├── README.md                       # Danh mục secret hệ thống cần
-│   ├── dev/
-│   └── prod/
+├── secrets/                        # SealedSecret — an toàn để commit
+│   ├── README.md                   # danh mục secret hệ thống cần
+│   ├── dev/<service>/*.yaml
+│   └── prod/<service>/*.yaml
+│
+├── .github/
+│   ├── workflows/
+│   │   ├── validate.yml
+│   │   └── auto-merge-dev.yml
+│   ├── CODEOWNERS
+│   └── renovate.json
 │
 ├── ci/
-│   ├── policy/                         # Rego: bắt buộc limits, cấm tag latest...
-│   ├── scripts/
-│   │   ├── validate.sh
-│   │   ├── render-all.sh
-│   │   ├── new-service.sh
-│   │   └── promotion-status.sh
-│   └── templates/                      # khuôn scaffold service mới
+│   ├── policy/                     # Rego: bắt buộc limits, cấm latest...
+│   └── scripts/
+│       ├── new-service.sh
+│       ├── render-all.sh
+│       └── promote.sh
 │
-├── apps/
-│   └── platform-api/                   # Mã nguồn backend (xem PLATFORM_API_PLAN.md)
-│
-├── scripts/                            # script vận hành (chuyển từ infra/scripts)
+├── scripts/                        # script vận hành
 ├── docs/
-│   ├── REFACTOR_PLAN.md                # file này
-│   ├── PLATFORM_API_PLAN.md
-│   ├── SECRET_MANAGEMENT.md
-│   ├── ARCHITECTURE.md
-│   ├── RUNBOOK.md                      # xử lý sự cố
-│   └── ONBOARDING.md
-├── .gitlab-ci.yml
 └── Makefile
 ```
 
-### Chi phí thêm 1 khách hàng mới — trước và sau
+### Tại sao gộp `tenants/` và `platform/` thành `apps/`
 
-| | Hiện tại | Sau khi refactor |
-|---|---|---|
-| File phải tạo | 6–8 | 3 (hoặc 1 lệnh `make new-service`) |
-| File ArgoCD phải viết | 2 | **0** |
-| Dòng values phải viết | ~120 | ~20 |
-| Nguy cơ copy sót | Cao | Thấp — có scaffold và schema kiểm tra |
-| Làm được qua API/UI | Không | Có |
+Bản trước tách hai thư mục. Nhưng khác biệt đã nằm trong trường `spec.category` của chính file khai báo rồi — tách thư mục chỉ thêm một cấp và thêm một ApplicationSet phải bảo trì.
+
+Cộng đồng khuyến nghị **không lồng quá 4 cấp**. Gộp lại giữ `registry/apps/lotus-clinic/values-dev.yaml` ở 3 cấp, còn dư chỗ cho `config/`.
+
+### Chi phí thêm 1 service mới
+
+```bash
+make new-service NAME=abc-clinic CHART=webservice
+# → tạo registry/apps/abc-clinic/{service,values-dev,values-prod}.yaml
+# → git checkout -b add-abc-clinic && commit && push && gh pr create
+```
+
+**Không phải viết file ArgoCD nào.** ApplicationSet tự phát hiện sau khi PR merge.
 
 ---
 
-## Phần 5 — Service Registry + ApplicationSet
+## 4. Registry + ApplicationSet
 
-Đây là thay đổi có tác động lớn nhất: **xoá 24 file Application, thay bằng 3 ApplicationSet.**
+### 4.1. File khai báo service
 
-### 5.1. File khai báo service
-
-`registry/tenants/lotus-clinic/service.yaml` — đây là toàn bộ những gì cần viết để ArgoCD biết về một service:
+`registry/apps/lotus-clinic/service.yaml` — toàn bộ những gì ArgoCD cần biết:
 
 ```yaml
 apiVersion: hnq.dev/v1
@@ -453,53 +212,46 @@ kind: ServiceRelease
 metadata:
   name: lotus-clinic
   owner: team-clinic
-  description: Backend hệ thống phòng khám Lotus
+  description: Backend phòng khám Lotus
 
 spec:
-  category: tenant                # tenant | platform | admin
-  chart: apps/webservice          # trỏ tới charts/apps/webservice
-  project: tenants                # AppProject nào quản
+  category: app                  # app | platform
+  chart: webservice              # webservice | datastore
 
-  # Danh sách môi trường được bật.
-  # Chưa có "prod" ở đây thì ArgoCD prod sẽ không tạo Application.
+  # Môi trường được bật. Chưa có "prod" ở đây → chưa có Application prod.
   environments:
     - env: dev
-      namespace: lotus-clinic-dev
     - env: prod
-      namespace: lotus-clinic-prod
 
-  # Khai báo TÊN các secret mà service cần (không phải giá trị).
-  # Dùng để sinh form nhập secret trên UI và để kiểm tra thiếu sót.
+  # Tên các secret service cần (KHÔNG phải giá trị).
+  # Dùng để CI kiểm tra thiếu sót và sinh form nhập secret sau này.
   requiredSecrets:
-    - name: lotus-clinic-backend-secrets
+    - name: lotus-clinic-backend
       keys: [DB_PASSWORD, JWT_SECRET, MINIO_SECRET_KEY]
-    - name: lotus-clinic-keystore
-      keys: [keystore.jks]
 ```
 
-`registry/tenants/lotus-clinic/values-dev.yaml` — **chỉ ghi phần khác mặc định**:
+> Namespace không cần khai — suy ra theo quy ước `<tên>-<env>`. Bớt một chỗ gõ sai.
+
+`registry/apps/lotus-clinic/values-dev.yaml` — chỉ phần khác mặc định:
 
 ```yaml
 image:
-  repository: registry.gitlab.com/hnq-tech/clients/lotus-clinic/lotus-backend
+  repository: ghcr.io/hnq-tech/lotus-backend
   tag: 6aebe241
 
 ingress:
-  host: client-lotus-clinic-dev.l2cteam.work
+  host: lotus-dev.l2cteam.work
 
 app:
   configFile: config/config_dev.yaml
-  secretName: lotus-clinic-backend-secrets
-  extraSecrets:
-    keystore: lotus-clinic-keystore
-    firebase: hnq-obgyn-clinic-service
+  secretName: lotus-clinic-backend
 ```
 
-Từ ~60 dòng xuống ~12 dòng. Tất cả phần còn lại — `containerPort: 1001`, probes, resources, `nodeSelector`, `tolerations`, cert-manager issuer, `imagePullSecrets`, `serviceMonitor` — đến từ `env/dev/defaults.yaml` và `charts/apps/webservice/values.yaml`.
+~10 dòng. Mọi thứ khác — `containerPort`, probe, resources, nodeSelector, cert-manager issuer, imagePullSecrets, serviceMonitor — đến từ `env/dev.yaml` và `charts/webservice/values.yaml`.
 
-### 5.2. File mặc định theo môi trường
+### 4.2. File mặc định theo môi trường
 
-`env/dev/defaults.yaml` — nơi hút hết phần trùng lặp:
+`env/dev.yaml`:
 
 ```yaml
 global:
@@ -513,18 +265,17 @@ ingress:
   className: traefik
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    cert-manager.io/cluster-issuer: letsencrypt-dns01-dev
+    cert-manager.io/cluster-issuer: letsencrypt-dev
   tls:
     enabled: true
 
 serviceAccount:
   imagePullSecrets:
-    - name: gitlab-registry        # ← đổi tên, hết dính vào lotus (Lỗi 3)
+    - name: ghcr-pull            # ← một tên chung, không dính tên khách hàng
 
-# Dev chạy trên node worker
+# Chọn node bằng LABEL, không bằng hostname (Q6)
 nodeSelector:
-  kubernetes.io/hostname: server02
-tolerations: []
+  hnq.dev/workload: dev
 
 resources:
   requests: { cpu: 100m, memory: 128Mi }
@@ -532,22 +283,23 @@ resources:
 
 serviceMonitor:
   enabled: true
-  interval: 15s
+
+# Dev: tự dọn resource thừa
+syncPolicy:
+  prune: true
 ```
 
-`env/prod/defaults.yaml` tương tự, khác node, khác issuer, resources lớn hơn.
+`env/prod.yaml` khác ở: `nodeSelector: hnq.dev/workload=prod`, issuer prod, resources lớn hơn, `replicas: 2`, và **`prune: false`** (Q5).
 
-**Đây chính là chỗ giải quyết Lỗi 3 một cách triệt để:** `imagePullSecrets` khai báo đúng một lần cho cả môi trường, không còn cơ hội để mỗi khách hàng ghi một kiểu.
+### 4.3. ApplicationSet
 
-### 5.3. ApplicationSet
-
-`gitops/bootstrap/templates/appset-tenants.yaml` (đã escape cho Helm):
+`gitops/bootstrap/appset-apps.yaml` — một file thay cho 24 file Application:
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
-  name: tenants-{{ .Values.env }}
+  name: apps
   namespace: argocd
 spec:
   goTemplate: true
@@ -556,470 +308,538 @@ spec:
   generators:
     - matrix:
         generators:
-          # (1) Quét mọi file khai báo khách hàng trên branch tương ứng
+          # (1) Quét mọi file khai báo service
           - git:
-              repoURL: {{ .Values.repoURL | quote }}
-              revision: {{ .Values.targetRevision | quote }}
+              repoURL: &repo https://github.com/hunho247/HNQ-Infra.git
+              revision: main
               files:
-                - path: "registry/tenants/*/service.yaml"
-
+                - path: "registry/apps/*/service.yaml"
           # (2) Bung theo danh sách môi trường khai báo trong chính file đó
           - list:
-              elementsYaml: {{ `"{{ toJson .spec.environments }}"` }}
+              elementsYaml: "{{ toJson .spec.environments }}"
 
   template:
     metadata:
-      # ⚠️ GIỮ NGUYÊN tên Application cũ để ArgoCD nhận (adopt) resource
-      #    đang chạy thay vì xoá đi tạo lại. Xem mục 13.1.
-      name: {{ `"{{ .metadata.name }}-{{ .env }}"` }}
+      name: "{{ .metadata.name }}-{{ .env }}"
       namespace: argocd
       labels:
-        hnq.dev/owner: {{ `"{{ .metadata.owner }}"` }}
-        hnq.dev/env: {{ `"{{ .env }}"` }}
+        hnq.dev/owner: "{{ .metadata.owner }}"
+        hnq.dev/env: "{{ .env }}"
       finalizers:
         - resources-finalizer.argocd.argoproj.io
     spec:
-      project: {{ `"{{ .spec.project }}"` }}-{{ .Values.env }}
+      project: "{{ .spec.category }}"        # app | platform
       source:
-        repoURL: {{ .Values.repoURL | quote }}
-        targetRevision: {{ .Values.targetRevision | quote }}
-        path: {{ `"charts/{{ .spec.chart }}"` }}
+        repoURL: *repo
+        targetRevision: main
+        path: "charts/{{ .spec.chart }}"
         helm:
-          releaseName: {{ `"{{ .metadata.name }}"` }}
+          releaseName: "{{ .metadata.name }}"
           valueFiles:
             - values.yaml
-            - "/env/{{ .Values.env }}/defaults.yaml"
-            - {{ `"/registry/tenants/{{ .metadata.name }}/values-{{ .env }}.yaml"` }}
+            - "/env/{{ .env }}.yaml"
+            - "/registry/apps/{{ .metadata.name }}/values-{{ .env }}.yaml"
           parameters:
             - name: global.serviceName
-              value: {{ `"{{ .metadata.name }}"` }}
+              value: "{{ .metadata.name }}"
       destination:
         server: https://kubernetes.default.svc
-        namespace: {{ `"{{ .namespace }}"` }}
+        namespace: "{{ .metadata.name }}-{{ .env }}"
       syncPolicy:
         automated:
-          prune: true
           selfHeal: true
+          # Q5: dev dọn tự động, prod thì không
+          prune: {{ if eq .env "dev" }}true{{ else }}false{{ end }}
         syncOptions:
           - CreateNamespace=true
           - PruneLast=true
           - ServerSideApply=true
         managedNamespaceMetadata:
           labels:
-            hnq.dev/env: {{ `"{{ .env }}"` }}
-            hnq.dev/owner: {{ `"{{ .metadata.owner }}"` }}
+            hnq.dev/env: "{{ .env }}"
+            hnq.dev/owner: "{{ .metadata.owner }}"
 ```
 
-### 5.4. Ba chi tiết kỹ thuật đáng lưu ý
+Ba điểm kỹ thuật:
 
-**`elementsYaml` — generator thứ hai đọc được kết quả của generator thứ nhất.**
-Tính năng này có từ ArgoCD 2.5. Nhờ nó, việc bật/tắt môi trường nằm ngay trong file khai báo service. Không khai `prod` trong `spec.environments` thì không có Application prod — không cần thêm cơ chế lọc nào khác. Đây chính là thứ khiến Lỗi 1 không thể lặp lại.
+- **`elementsYaml`** (ArgoCD ≥ 2.5) cho generator thứ hai đọc kết quả của generator thứ nhất. Nhờ đó bật/tắt môi trường nằm ngay trong file khai báo service.
+- **`valueFiles` bắt đầu bằng `/`** = tính từ gốc repo. Cho phép chart ở `charts/`, values ở `registry/`.
+- **`ServerSideApply=true`** cần cho chart có CRD lớn (kube-prometheus-stack).
 
-**`valueFiles` bắt đầu bằng `/` = tính từ gốc repo.**
-Nhờ đó chart nằm ở `charts/`, values nằm ở `registry/`, và vẫn dùng chung được.
+> Vì chỉ còn **một branch**, `targetRevision: main` ghi cứng được — không cần bọc ApplicationSet trong Helm chart như bản trước. Đây là lợi ích lớn nhất của quyết định Q1 về mặt đơn giản hoá.
 
-**`ServerSideApply=true`.**
-Cần thiết cho các chart có CRD lớn (như kube-prometheus-stack) vượt quá giới hạn 262KB của annotation `last-applied-configuration`.
+### 4.4. Chart bên thứ ba dùng Application tường minh
 
-### 5.5. Kết quả
+Nhóm này danh sách ngắn, cố định, mỗi cái một kiểu — ép vào ApplicationSet chỉ thêm phức tạp:
 
-```mermaid
-flowchart LR
-  subgraph T["Trước — 24 file Application"]
-    A1["apps/dev/clients/ (4)"]
-    A2["apps/prod/clients/ (4)"]
-    A3["apps/dev/platform/ (10)"]
-    A4["apps/prod/platform/ (7)"]
-    A5["apps/*/admin/ (2)"]
-  end
-
-  subgraph S["Sau — 3 ApplicationSet + N file khai báo"]
-    B1[appset-tenants]
-    B2[appset-platform]
-    B3[appset-vendor]
-    R["registry/**/service.yaml<br/>1 file cho 1 service"]
-  end
-
-  T ==>|tái cấu trúc| S
+```yaml
+# gitops/bootstrap/app-cert-manager.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: https://charts.jetstack.io
+    chart: cert-manager
+    targetRevision: v1.16.2          # ← Renovate tự mở PR nâng phiên bản
+    helm:
+      values: |
+        crds:
+          enabled: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated: { selfHeal: true, prune: false }
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
 ```
+
+Danh sách: `cert-manager`, `sealed-secrets`, `kube-prometheus-stack`, `velero`, `traefik-config`. Năm file, thay đổi vài tháng một lần.
+
+### 4.5. Bootstrap — một lệnh duy nhất
+
+```yaml
+# gitops/root.yaml — apply tay ĐÚNG MỘT LẦN trong đời cluster
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hunho247/HNQ-Infra.git
+    targetRevision: main
+    path: gitops/bootstrap
+    directory: { recurse: true }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated: { selfHeal: true, prune: true }
+```
+
+```bash
+kubectl -n argocd apply -f gitops/root.yaml
+```
+
+Xong. Mọi thứ còn lại tự dựng.
 
 ---
 
-## Phần 6 — Library chart và chart tổng quát
+## 5. Library chart
 
-### 6.1. Vấn đề
-
-11 chart, mỗi chart tự viết lại cùng một bộ template. Như đã chứng minh ở Phần 1: `mariadb/_helpers.tpl` và `postgres/_helpers.tpl` khác nhau đúng một chuỗi.
-
-### 6.2. Thiết kế
+### 5.1. Ba chart cho toàn hệ thống
 
 ```mermaid
 flowchart TD
-  LIB["charts/library/hnq-common<br/>(type: library)"]
-
-  WS["charts/apps/webservice<br/>HTTP service không giữ trạng thái"]
-  DS["charts/apps/datastore<br/>datastore một node"]
+  LIB["charts/hnq-common<br/>(type: library)"]
+  WS["charts/webservice"]
+  DS["charts/datastore"]
 
   LIB --> WS
   LIB --> DS
 
-  WS --> T1[lotus-clinic]
-  WS --> T2[giaan-clinic]
-  WS --> T3[biboo-clinic]
-  WS --> T4[hocmon-clinic]
-  WS --> T5[push-notify]
-  WS --> T6[push-notify-v2]
-  WS --> T7[outline]
-  WS --> T8[server-control]
-  WS --> T9[platform-api]
-
-  DS --> D1[mariadb]
-  DS --> D2[postgres]
-  DS --> D3[redis]
-  DS --> D4[minio]
-  DS --> D5[opensearch]
+  WS --> A["4 clinic · push-notify<br/>outline · platform-api"]
+  DS --> B["mariadb · postgres · redis<br/>minio · opensearch"]
 ```
 
-**`charts/library/hnq-common`** cung cấp các helper dùng chung:
+`hnq-common` cung cấp: `hnq.fullname`, `hnq.labels`, `hnq.selectorLabels`, `hnq.image`, `hnq.imagePullSecrets`, `hnq.service`, `hnq.ingress`, `hnq.probes`, `hnq.resources`, `hnq.persistence`, `hnq.podAnnotations`.
 
-| Helper | Thay thế cho |
+Đổi một quy ước label → sửa **một chỗ**, không phải 11 chỗ như cấu trúc cũ.
+
+### 5.2. Sync waves — thêm mới theo research
+
+Đưa thẳng vào `hnq-common` để mọi chart có sẵn, giải quyết bài toán cụ thể: **backend khởi động trước khi MariaDB sẵn sàng**.
+
+```yaml
+# charts/hnq-common/templates/_annotations.tpl
+{{- define "hnq.syncWave" -}}
+argocd.argoproj.io/sync-wave: {{ .wave | quote }}
+{{- end -}}
+```
+
+Quy ước:
+
+| Wave | Resource |
 |---|---|
-| `hnq.fullname`, `hnq.name`, `hnq.chart` | 11 bản `_helpers.tpl` |
-| `hnq.labels`, `hnq.selectorLabels` | 11 bản |
-| `hnq.service` | 11 bản `service.yaml` |
-| `hnq.nodePortService` | 3 bản `nodeport-service.yaml` |
-| `hnq.ingress` | 7 bản `ingress.yaml` |
-| `hnq.probes`, `hnq.resources`, `hnq.securityContext` | rải rác trong deployment |
-| `hnq.image`, `hnq.imagePullSecrets` | rải rác |
-| `hnq.persistence` | xử lý cả hostPath / PVC / existingClaim |
+| `-1` | Namespace, CRD |
+| `0` | ConfigMap, Secret, ServiceAccount, PVC |
+| `1` | Deployment, StatefulSet |
+| `2` | Ingress, HPA, ServiceMonitor |
 
-**`charts/apps/webservice/values.yaml`** (rút gọn) — một chart phủ hết mọi HTTP service:
+### 5.3. Không tạo namespace trong chart
 
-```yaml
-global:
-  env: ""
-  serviceName: ""
-
-image:
-  repository: ""
-  tag: ""
-  pullPolicy: IfNotPresent
-
-replicas: 1
-containerPort: 8080
-
-service:
-  type: ClusterIP
-  port: 80
-  nodePort:
-    enabled: false
-
-ingress:
-  enabled: true
-  host: ""
-  path: /
-  tls: { enabled: true }
-
-app:
-  configFile: ""        # render thành ConfigMap
-  secretName: ""        # nạp vào env bằng envFrom
-  extraSecrets: {}      # mount thêm (keystore, firebase credentials...)
-  env: []
-
-probes:
-  readiness: { enabled: true, path: /health }
-  liveness:  { enabled: true, path: /health }
-
-resources: {}           # lấy từ env/<env>/defaults.yaml
-serviceMonitor:
-  enabled: false
-```
-
-**`charts/apps/datastore`** phủ mariadb/postgres/redis/minio/opensearch bằng các cờ bật tắt:
-
-```yaml
-workload:
-  kind: StatefulSet        # hoặc Deployment
-service:
-  headless: { enabled: true }
-  nodePort:  { enabled: false, port: 0 }
-persistence:
-  mode: localPV            # hostPath | pvc | localPV
-config:
-  files: {}                # render thành ConfigMap
-```
-
-### 6.3. Dự kiến giảm
-
-| | Trước | Sau |
-|---|---:|---:|
-| Số dòng template | ~2.713 | ~700 |
-| Chart tự viết | 11 | 3 |
-| Số chỗ phải sửa khi đổi quy ước label | 11 | 1 |
-
-### 6.4. Bỏ `templates/namespace.yaml`
-
-Namespace do ArgoCD tạo qua `CreateNamespace=true`, còn label/annotation gắn qua `managedNamespaceMetadata` (đã có trong ApplicationSet ở mục 5.3). Xoá `namespace.yaml` khỏi mọi chart → hết tranh chấp ownership.
+Namespace do ArgoCD tạo qua `CreateNamespace=true`, label gắn qua `managedNamespaceMetadata`. Không có `templates/namespace.yaml` trong bất kỳ chart nào — tránh tranh chấp quyền sở hữu resource.
 
 ---
 
-## Phần 7 — Secret
+## 6. Môi trường và promotion
 
-Chi tiết đầy đủ ở [SECRET_MANAGEMENT.md](./SECRET_MANAGEMENT.md). Tóm tắt phần liên quan tới hạ tầng:
+### 6.1. Mô hình
 
-**Chọn Sealed Secrets** (như đã thống nhất). Lý do:
+Một branch `main`. Dev và prod khác nhau bằng file values:
 
-- `SealedSecret` chỉ là một CRD bình thường → ArgoCD sync được ngay, **không cần build lại image repo-server** (SOPS thì cần)
-- Không phải dựng thêm hệ thống nào (Vault thì phải)
-- Cài đúng một controller là xong
-
-Đánh đổi: sealing key gắn với cluster, nên **bắt buộc phải backup key ra ngoài cluster**. Mất key = phải tạo lại toàn bộ secret từ đầu.
-
-Quy trình thủ công (trước khi có Platform API):
-
-```bash
-# 1. Tạo secret bình thường — KHÔNG commit file này
-kubectl create secret generic lotus-clinic-backend-secrets \
-  --namespace lotus-clinic-dev \
-  --from-literal=DB_PASSWORD='...' \
-  --dry-run=client -o yaml > /tmp/s.yaml
-
-# 2. Mã hoá — output an toàn để commit
-kubeseal --format yaml --controller-namespace kube-system \
-  < /tmp/s.yaml > secrets/dev/lotus-clinic/backend-secrets.yaml
-
-# 3. Xoá file tạm, commit file đã mã hoá
-shred -u /tmp/s.yaml
-git add secrets/dev/lotus-clinic/backend-secrets.yaml
+```text
+registry/apps/lotus-clinic/values-dev.yaml    → image.tag: 7bcd1234   (mới, đang test)
+registry/apps/lotus-clinic/values-prod.yaml   → image.tag: f1eb557d   (ổn định)
 ```
 
-Bắt buộc kèm theo:
+Prod giữ tag cũ cho tới khi bạn chủ động đổi. **Promote được từng service một** — đây là lý do chính chọn 1 branch.
 
-- **Backup sealing key ngay khi cài**, cất ở password manager hoặc offline:
-  ```bash
-  kubectl -n kube-system get secret \
-    -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml \
-    > sealed-secrets-key-backup.yaml
-  ```
-- **`gitleaks` trong CI** để chặn secret thô lọt vào repo
-- **`secrets/README.md`** liệt kê mọi secret hệ thống cần, để người mới biết phải chuẩn bị gì
-
----
-
-## Phần 8 — Tự động cập nhật image tag
-
-### 8.1. Nguyên tắc: dev tự động, prod qua MR
+### 6.2. Luồng
 
 ```mermaid
 sequenceDiagram
   participant D as Lập trình viên
-  participant CI as CI của repo app
-  participant R as Container Registry
-  participant I as HNQ-Infra
+  participant CI as CI repo ứng dụng
+  participant GH as GitHub (main)
   participant A as ArgoCD
 
-  D->>CI: push code
-  CI->>R: build & push image:<sha>
-
   rect rgb(232, 245, 233)
-  Note over CI,I: DEV — tự động, không cần duyệt
-  CI->>I: commit thẳng vào develop<br/>values-dev.yaml: tag = <sha>
-  I->>A: webhook
-  A->>A: sync dev
+  Note over CI,A: DEV — tự động hoàn toàn
+  D->>CI: push code
+  CI->>CI: build & push ghcr.io/...:sha
+  CI->>GH: PR đổi values-dev.yaml (chỉ image.tag)
+  GH->>GH: CI xanh → auto-merge
+  GH->>A: webhook → sync dev
   end
+
+  D->>A: kiểm tra dev
 
   rect rgb(255, 243, 224)
-  Note over D,I: PROD — cần người duyệt
-  D->>I: MR develop → main<br/>(kèm bump values-prod.yaml)
-  Note over I: CI kiểm tra + reviewer duyệt
-  D->>I: merge
-  I->>A: webhook
-  A->>A: sync prod
+  Note over D,A: PROD — cần 1 người duyệt
+  D->>GH: make promote NAME=lotus-clinic<br/>→ PR đổi values-prod.yaml
+  Note over GH: CODEOWNERS yêu cầu 1 approval
+  D->>GH: đồng nghiệp duyệt → merge
+  GH->>A: webhook → sync prod
   end
 ```
 
-### 8.2. Cách triển khai
+### 6.3. Vì sao dev cũng dùng PR (Q2)
 
-**Job cuối pipeline của repo ứng dụng:**
+Bản trước cho dev commit thẳng để nhanh. Nhưng trên GitHub, muốn commit thẳng vào branch được bảo vệ thì phải cấp quyền bypass cho bot — thêm một cơ chế đặc quyền phải quản.
+
+Cách gọn hơn: **tất cả đều qua PR**, và PR của dev tự merge:
 
 ```yaml
-update-infra-dev:
-  stage: deploy
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "develop"'
-  script:
-    - git clone --branch develop https://oauth2:$INFRA_TOKEN@gitlab.com/hnq-tech/hnq-infra.git
-    - cd hnq-infra
-    - yq -i ".image.tag = \"$CI_COMMIT_SHORT_SHA\"" registry/tenants/$SERVICE/values-dev.yaml
-    - git commit -am "chore($SERVICE): dev image → $CI_COMMIT_SHORT_SHA"
-    - git push origin develop
+# .github/workflows/auto-merge-dev.yml
+name: auto-merge dev image bumps
+on: pull_request
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Chỉ chấp nhận PR đổi đúng image.tag ở values-dev.yaml
+        id: check
+        run: |
+          FILES=$(git diff --name-only origin/main...HEAD)
+          # Mọi file thay đổi phải khớp values-dev.yaml
+          echo "$FILES" | grep -qvE '^registry/apps/[^/]+/values-dev\.yaml$' && exit 1
+          # Mọi dòng thay đổi phải là image.tag
+          git diff origin/main...HEAD -U0 -- $FILES \
+            | grep -E '^[+-][^+-]' | grep -qvE '^[+-]\s*tag:' && exit 1
+          echo "ok=true" >> $GITHUB_OUTPUT
+
+      - if: steps.check.outputs.ok == 'true'
+        run: gh pr merge --auto --squash "${{ github.event.number }}"
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
 ```
 
-**Đưa lên prod** — dùng script (hoặc sau này là API `POST /services/{name}/promote`):
+Lợi ích:
+
+- Không cần token có quyền bypass protected branch
+- Mọi thay đổi đều có PR để xem lại, kể cả dev
+- Platform API sau này **chỉ cần quyền tạo branch + mở PR** — không bao giờ cần push vào `main`
+
+### 6.4. CODEOWNERS
+
+```
+# .github/CODEOWNERS
+# Mặc định: ai review cũng được
+*                                   @hunho247/infra
+
+# Thay đổi ảnh hưởng prod → cần người của đội hạ tầng duyệt
+/registry/apps/*/values-prod.yaml   @hunho247/infra
+/env/prod.yaml                      @hunho247/infra
+/gitops/                            @hunho247/infra
+/charts/                            @hunho247/infra
+/secrets/prod/                      @hunho247/infra
+```
+
+Cài đặt branch protection cho `main`: yêu cầu PR, 1 approval, CI xanh, và bật "Require review from Code Owners".
+
+> Với 3 người thì 1 approval là vừa — luôn có người duyệt được, mà vẫn có 4 mắt nhìn vào mọi thay đổi prod.
+
+### 6.5. Script promote
 
 ```bash
-# ci/scripts/promote.sh lotus-clinic
-TAG=$(yq '.image.tag' registry/tenants/$1/values-dev.yaml)
-git checkout -b promote/$1-$TAG develop
-yq -i ".image.tag = \"$TAG\"" registry/tenants/$1/values-prod.yaml
-git commit -am "release($1): prod image → $TAG"
-git push -u origin promote/$1-$TAG
-# → mở MR vào main
+#!/usr/bin/env bash
+# ci/scripts/promote.sh <tên-service>
+set -euo pipefail
+SVC="$1"
+TAG=$(yq '.image.tag' "registry/apps/$SVC/values-dev.yaml")
+CUR=$(yq '.image.tag' "registry/apps/$SVC/values-prod.yaml")
+
+[ "$TAG" = "$CUR" ] && { echo "prod đã chạy $TAG rồi"; exit 0; }
+
+git checkout -b "promote/$SVC-$TAG" main
+yq -i ".image.tag = \"$TAG\"" "registry/apps/$SVC/values-prod.yaml"
+git commit -am "release($SVC): prod $CUR → $TAG"
+git push -u origin "promote/$SVC-$TAG"
+gh pr create --fill --base main \
+  --title "release($SVC): prod $CUR → $TAG" \
+  --body "Đã chạy ở dev từ $(git log -1 --format=%cr -- registry/apps/$SVC/values-dev.yaml)."
 ```
-
-Điểm hay của cách này: **`values-prod.yaml` được sửa trên nhánh xuất phát từ `develop`**, nên khi merge vào `main` không bao giờ có conflict, và `develop` cũng luôn biết prod đang chạy tag nào.
-
-### 8.3. Vì sao không dùng ArgoCD Image Updater
-
-Image Updater tự quét registry và ghi ngược vào Git. Ít phải viết CI hơn, nhưng thêm một thành phần phải vận hành và log khó lần hơn khi có sự cố. Ở quy mô dưới ~20 service, job CI rõ ràng hơn và dễ debug hơn. Cân nhắc lại khi số service tăng.
 
 ---
 
-## Phần 9 — AppProject và phân quyền
+## 7. Secret
 
-Thay `project: default` bằng project có ranh giới rõ ràng. Vì một cluster chạy cả dev lẫn prod, tên project phải có hậu tố môi trường.
+Chi tiết ở [SECRET_MANAGEMENT.md](./SECRET_MANAGEMENT.md). Tóm tắt:
 
-`gitops/bootstrap/templates/project-tenants.yaml`:
+**Sealed Secrets.** Secret mã hoá bằng public key của controller, commit vào Git an toàn, chỉ controller trong cluster giải mã được.
+
+Vì đội chỉ 3 người và ai cũng có quyền vào cluster, quy trình chuẩn là dùng `kubeseal` ở máy mình:
+
+```bash
+kubectl create secret generic lotus-clinic-backend \
+  --namespace lotus-clinic-prod \
+  --from-literal=DB_PASSWORD='...' \
+  --dry-run=client -o yaml \
+| kubeseal --format yaml > secrets/prod/lotus-clinic/backend.yaml
+
+git add secrets/prod/lotus-clinic/backend.yaml   # an toàn — đã mã hoá
+```
+
+**Bắt buộc ngay sau khi cài controller:** backup sealing key ra ngoài cluster. Mất key = phải tạo lại toàn bộ secret.
+
+```bash
+kubectl -n kube-system get secret \
+  -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml \
+  > sealing-key-backup.yaml     # cất ở password manager, KHÔNG commit
+```
+
+CI có `gitleaks` chặn secret thô lọt vào repo, và một job kiểm tra `requiredSecrets` trong registry đã có đủ file trong `secrets/<env>/` chưa.
+
+---
+
+## 8. AppProject
+
+Hai project, không phải sáu. Với 3 người thì ranh giới cần là **giới hạn phạm vi thiệt hại**, không phải phân quyền giữa các đội.
 
 ```yaml
+# gitops/bootstrap/project-apps.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
-  name: tenants-{{ .Values.env }}
+  name: app
   namespace: argocd
 spec:
-  description: Ứng dụng khách hàng — không được đụng resource cấp cluster
-
+  description: Ứng dụng — không được tạo resource cấp cluster
   sourceRepos:
-    - {{ .Values.repoURL | quote }}
-
+    - https://github.com/hunho247/HNQ-Infra.git
   destinations:
-    - server: https://kubernetes.default.svc
-      namespace: "*-{{ .Values.env }}"
-
-  # Khách hàng KHÔNG được tạo resource cấp cluster
-  clusterResourceWhitelist: []
-
-  namespaceResourceBlacklist:
-    - { group: "", kind: ResourceQuota }
-    - { group: "", kind: LimitRange }
-
-  roles:
-    - name: developer
-      policies:
-        - p, proj:tenants-{{ .Values.env }}:developer, applications, get,  tenants-{{ .Values.env }}/*, allow
-        {{- if eq .Values.env "dev" }}
-        # Chỉ dev mới cho phép developer tự sync
-        - p, proj:tenants-dev:developer, applications, sync, tenants-dev/*, allow
-        {{- end }}
-      groups:
-        - hnq-developers
+    - { server: https://kubernetes.default.svc, namespace: "*-dev" }
+    - { server: https://kubernetes.default.svc, namespace: "*-prod" }
+  clusterResourceWhitelist: []          # ← chặn hoàn toàn ClusterRole, CRD...
 ```
-
-Ba project mỗi môi trường: `platform-*` (được tạo resource cluster), `tenants-*` (bị chặn), `admin-*`.
-
-Giá trị thực tế:
-
-- Lập trình viên tự sync được app dev của mình, **không sync được prod**
-- Chart của khách hàng không tạo được `ClusterRole`
-- Đây là điều kiện tiên quyết để mở Platform API cho người ngoài team hạ tầng dùng
-
----
-
-## Phần 10 — CI kiểm tra
-
-`.gitlab-ci.yml`:
 
 ```yaml
-stages: [validate, render, policy, security, report]
-
-yaml-lint:
-  stage: validate
-  script: [yamllint -c ci/yamllint.yaml registry/ env/ gitops/]
-
-schema-validate:
-  stage: validate
-  script:
-    # Mọi service.yaml phải khớp JSON Schema — đúng cái schema mà UI dùng
-    - |
-      for f in registry/*/*/service.yaml; do
-        ajv validate -s registry/schema/service.schema.json -d "$f" --spec=draft2020
-      done
-
-helm-lint:
-  stage: validate
-  script: [for c in charts/apps/*; do helm lint "$c"; done]
-
-bootstrap-template:
-  stage: validate
-  script:
-    # Bắt lỗi quên escape {{ }} giữa Helm và ApplicationSet (mục 3.5)
-    - helm template gitops/bootstrap -f gitops/bootstrap/values-dev.yaml  | grep -q 'metadata.name' || exit 1
-    - helm template gitops/bootstrap -f gitops/bootstrap/values-prod.yaml | grep -q 'metadata.name' || exit 1
-
-render-all:
-  stage: render
-  script: [ci/scripts/render-all.sh > rendered.yaml]
-  artifacts: { paths: [rendered.yaml] }
-
-kubeconform:
-  stage: render
-  needs: [render-all]
-  script:
-    - kubeconform -strict -summary -kubernetes-version 1.31.0
-        -schema-location default
-        -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
-        rendered.yaml
-
-policy:
-  stage: policy
-  needs: [render-all]
-  script: [conftest test --policy ci/policy rendered.yaml]
-
-gitleaks:
-  stage: security
-  script: [gitleaks detect --no-git --redact]
-
-promotion-status:
-  stage: report
-  rules: [{ if: '$CI_COMMIT_BRANCH == "develop"' }]
-  script: [ci/scripts/promotion-status.sh]
-  allow_failure: true
+# gitops/bootstrap/project-platform.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  description: Nền tảng — được tạo resource cấp cluster
+  sourceRepos: ["*"]                    # chart bên thứ ba từ nhiều nguồn
+  destinations:
+    - { server: https://kubernetes.default.svc, namespace: "*" }
+  clusterResourceWhitelist:
+    - { group: "*", kind: "*" }
 ```
 
-`ci/policy/` là nơi biến "quy ước" thành "ràng buộc bắt buộc":
+Giá trị thật: một chart ứng dụng viết sai **không thể** tạo `ClusterRole` hay đụng vào `kube-system`.
 
-| Rule | Ngăn được chuyện gì |
-|---|---|
-| Container phải có `resources.limits` và `requests` | Một pod ăn hết CPU của node |
-| Cấm `image: *:latest` | Deploy không tái tạo được, rollback không biết về đâu |
-| Bắt buộc có `readinessProbe` | Traffic vào pod chưa sẵn sàng |
-| Cấm `hostNetwork` trừ danh sách cho phép | **Đúng sự cố node-exporter 30 giờ trong `issues.md`** |
-| Cấm `privileged: true` | Thoát container |
-| `Ingress` phải có annotation `cert-manager.io/cluster-issuer` | Domain chạy không TLS |
-| Namespace phải khớp `<service>-<env>` | Deploy nhầm môi trường |
-| Service prod phải có `replicas >= 2` (trừ datastore) | Downtime khi restart pod |
+### Việc phải làm ngay khi cài ArgoCD
+
+```yaml
+# Trong values của chart argo-cd
+configs:
+  cm:
+    # Tắt tài khoản admin dùng chung — đăng nhập bằng GitHub OIDC
+    admin.enabled: "false"
+  rbac:
+    policy.default: ""                  # deny-by-default
+    policy.csv: |
+      g, hunho247:infra, role:admin
+    scopes: '[org, team]'
+  dex.config: |
+    connectors:
+      - type: github
+        id: github
+        name: GitHub
+        config:
+          clientID: $github-oidc:clientID
+          clientSecret: $github-oidc:clientSecret
+          orgs: [{ name: hunho247, teams: [infra] }]
+```
+
+RBAC mặc định của ArgoCD quá rộng ([Research §7](./RESEARCH_BEST_PRACTICES.md#7--bảo-mật-và-multi-tenancy)) — với server mới thì làm đúng ngay từ đầu là miễn phí.
 
 ---
 
-## Phần 11 — Lưu trữ và backup
+## 9. CI trên GitHub Actions
 
-### 11.1. Thống nhất đường dẫn
+```yaml
+# .github/workflows/validate.yml
+name: validate
+on:
+  pull_request:
+  push: { branches: [main] }
 
-Chốt **một** quy ước cho mọi node, mọi môi trường:
+env:
+  HELM_VERSION: "3.16.0"
+  KUBECONFORM_VERSION: "0.6.7"
+  CONFTEST_VERSION: "0.56.0"
 
-```text
-/srv/k3s/<env>/<nhóm>/<service>/
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-ví dụ:  /srv/k3s/prod/storage/mariadb/
-        /srv/k3s/dev/storage/minio/
+      - name: Cài công cụ
+        run: |
+          curl -sL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" | tar xz
+          sudo mv linux-amd64/helm /usr/local/bin/
+          curl -sL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | sudo tar xz -C /usr/local/bin kubeconform
+          curl -sL "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz" | sudo tar xz -C /usr/local/bin conftest
+          helm plugin install https://github.com/helm-unittest/helm-unittest
+
+      - name: yamllint
+        run: yamllint -c ci/yamllint.yaml registry/ env/ gitops/
+
+      - name: Kiểm tra schema của mọi file khai báo service
+        run: |
+          npx -y ajv-cli@5 validate --spec=draft2020 \
+            -s registry/schema/service.schema.json \
+            -d "registry/apps/*/service.yaml"
+
+      - name: helm lint + unittest
+        run: |
+          for c in charts/webservice charts/datastore; do
+            helm lint "$c"
+            helm unittest "$c"
+          done
+
+      - name: Kiểm tra thiếu secret
+        run: ci/scripts/check-secrets.sh
+
+      - name: Render mọi service × mọi môi trường
+        run: ci/scripts/render-all.sh > rendered.yaml
+
+      - name: kubeconform
+        run: |
+          kubeconform -strict -summary -kubernetes-version 1.31.0 \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            rendered.yaml
+
+      - name: Policy (conftest)
+        run: conftest test --policy ci/policy rendered.yaml
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+      - uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: charts/
+          severity: HIGH,CRITICAL
+          exit-code: "1"
 ```
 
-Cách chuyển không downtime: tạo symlink từ đường dẫn cũ sang mới → đổi values → kiểm tra chạy ổn → chuyển data thật trong cửa sổ bảo trì → xoá symlink.
+### Policy bắt buộc (`ci/policy/`)
 
-### 11.2. Thay `hostPath` bằng `local` PersistentVolume
+| Rule | Ngăn được |
+|---|---|
+| Mọi container có `resources.limits` và `requests` | Một pod ăn hết CPU node |
+| Cấm `image: *:latest` | Deploy không tái tạo được |
+| Bắt buộc `readinessProbe` | Traffic vào pod chưa sẵn sàng |
+| Cấm `hostNetwork` trừ danh sách cho phép | Xung đột port giữa các DaemonSet |
+| Cấm `privileged: true` | Thoát container |
+| `Ingress` phải có `cert-manager.io/cluster-issuer` | Domain chạy không TLS |
 
-`hostPath` thô không cho scheduler biết ràng buộc gì, nên phải `nodeSelector` bằng tay. Dùng `local` PV thì ràng buộc node nằm ngay trong PV:
+### Renovate — thêm mới theo research
+
+```json
+// .github/renovate.json
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "Asia/Ho_Chi_Minh",
+  "schedule": ["before 9am on monday"],
+  "packageRules": [
+    {
+      "description": "Gom bản vá nhỏ vào 1 PR để đỡ nhiễu",
+      "matchUpdateTypes": ["patch", "minor"],
+      "groupName": "chart patches"
+    },
+    {
+      "description": "Nâng major phải review riêng",
+      "matchUpdateTypes": ["major"],
+      "addLabels": ["needs-attention"]
+    }
+  ]
+}
+```
+
+Renovate tự mở PR khi `cert-manager`, `kube-prometheus-stack`, `sealed-secrets` có bản mới — và PR đó chạy qua đúng bộ CI như PR của người. Cấu hình 2 giờ, khỏi phải nhớ đi kiểm tra phiên bản thủ công.
+
+---
+
+## 10. Cluster và lưu trữ
+
+Server mới = làm đúng từ đầu, không phải sửa sau.
+
+### 10.1. Gắn label cho node
+
+```bash
+# Thay cho việc ghim nodeSelector theo hostname (Q6)
+kubectl label node <node-dev>  hnq.dev/workload=dev
+kubectl label node <node-prod> hnq.dev/workload=prod
+kubectl label node <node-prod> hnq.dev/storage=true
+```
+
+Sau này đổi/thêm node chỉ cần gắn label, không phải sửa một dòng values nào.
+
+### 10.2. Đường dẫn thống nhất
+
+```text
+/srv/k3s/<env>/<service>/
+
+ví dụ:  /srv/k3s/prod/mariadb/
+        /srv/k3s/dev/minio/
+```
+
+Một quy ước, mọi node, mọi môi trường. Tạo sẵn khi dựng server.
+
+### 10.3. local PersistentVolume thay hostPath
+
+`hostPath` thô không cho scheduler biết ràng buộc, phải ghim node bằng tay. `local` PV đặt ràng buộc ngay trong PV:
 
 ```yaml
 apiVersion: v1
@@ -1029,273 +849,199 @@ metadata:
 spec:
   capacity: { storage: 50Gi }
   accessModes: [ReadWriteOnce]
-  persistentVolumeReclaimPolicy: Retain     # ← bảo vệ data khi lỡ xoá PVC
+  persistentVolumeReclaimPolicy: Retain      # bảo vệ khi lỡ xoá PVC
   storageClassName: local-storage
   local:
-    path: /srv/k3s/prod/storage/mariadb
+    path: /srv/k3s/prod/mariadb
   nodeAffinity:
     required:
       nodeSelectorTerms:
         - matchExpressions:
-            - key: kubernetes.io/hostname
+            - key: hnq.dev/storage
               operator: In
-              values: [hnq-server-vietnix-01-hjnu]
+              values: ["true"]
 ```
 
-Lợi ích:
+### 10.4. Backup
 
-- Bỏ được `nodeSelector` khỏi values của từng service — scheduler tự biết đặt pod ở đâu
-- `Retain` giữ lại data khi PVC bị xoá nhầm
-- Nhìn `kubectl get pv` là biết ngay data nằm ở node nào
+Velero, lưu vào MinIO trong cluster:
 
-### 11.3. Backup
-
-Thêm `registry/platform/velero/`, backup vào MinIO đã có sẵn:
-
-| Môi trường | Tần suất | Giữ lại |
+| Phạm vi | Tần suất | Giữ |
 |---|---|---|
-| dev | 1 lần/ngày | 7 ngày |
-| prod | 6 giờ/lần | 30 ngày |
+| Namespace `*-prod` + PV | 6 giờ/lần | 30 ngày |
+| Namespace `*-dev` | 1 ngày/lần | 7 ngày |
+| **Namespace `argocd`** | 1 ngày/lần | 30 ngày |
 
-Phạm vi: PersistentVolume + manifest của namespace.
+Namespace `argocd` là bổ sung theo research — mất nó là mất toàn bộ cấu hình GitOps.
 
-**Thêm job kiểm tra restore hằng tháng.** Backup chưa từng restore thử thì chưa phải là backup — nó chỉ là một thư mục chiếm dung lượng.
+**Bắt buộc: test restore một lần trong Phase 4.** Backup chưa restore thử thì chưa phải backup.
 
-### 11.4. Về chuyện HA — ghi nhận, chưa làm
+### 10.5. Longhorn — chưa làm
 
-Longhorn hoặc Mayastor cho volume có bản sao là hướng đúng về lâu dài. **Nhưng** cụm hiện đang chạy flannel qua interface `tailscale0`. Replication khối qua WAN sẽ rất chậm, và nhiều khả năng gây ra đúng loại sự cố mà nó định phòng ngừa.
+Tài liệu chính thức k3s nói rõ local-path là node-local, không phù hợp production đa node. Longhorn là hướng đúng — **nhưng chỉ khi các node nằm chung LAN**.
 
-Khuyến nghị: **giữ local storage, nhưng backup cho chắc chắn**. Chỉ xét storage phân tán khi các node nằm chung một LAN.
+Nếu server mới vẫn dùng Tailscale làm `flannel-iface` như hệ thống cũ, replication khối qua WAN sẽ rất chậm và dễ gây ra chính sự cố nó định phòng. Cộng đồng chấp nhận mô hình lai: local-path/local PV cho phần lớn, Longhorn cho những gì thật sự cần.
+
+> **Cần bạn xác nhận:** server mới có nhiều node không, và các node có chung LAN không? Câu trả lời quyết định mục này.
 
 ---
 
-## Phần 12 — Lộ trình
+## 11. Lộ trình 6 tuần
 
-Bạn để tôi tự quyết timeline. Tôi đề xuất **11 tuần**, chia 6 phase. Nguyên tắc: **mỗi phase kết thúc ở trạng thái chạy được** — dừng lại ở bất kỳ phase nào cũng không để hệ thống nửa vời.
+Greenfield nên không có phase migrate. Mỗi phase kết thúc ở trạng thái chạy được.
 
 ```mermaid
 gantt
-  title Lộ trình tái cấu trúc
+  title Lộ trình
   dateFormat YYYY-MM-DD
   axisFormat %d/%m
 
-  section P0 · An toàn
-  Kiểm kê & backup              :p0a, 2026-09-15, 3d
-  CI cơ bản trên cấu trúc cũ    :p0b, after p0a, 2d
-  Sửa lỗi làm ngay được         :p0c, after p0a, 2d
+  section T1 · Nền
+  Dựng k3s + label + đường dẫn   :a1, 2026-09-15, 2d
+  ArgoCD + OIDC + tắt admin      :a2, after a1, 1d
+  Repo GitHub + CI + Renovate    :a3, after a1, 2d
 
-  section P1 · GitOps
-  Cấu trúc thư mục + env        :p1a, after p0b, 3d
-  AppProject + bootstrap chart  :p1b, after p1a, 2d
-  Registry + ApplicationSet     :p1c, after p1b, 5d
-  Chuyển đổi + kiểm chứng       :p1d, after p1c, 3d
+  section T2 · Chart
+  hnq-common + unittest          :b1, after a3, 3d
+  webservice + datastore         :b2, after b1, 3d
 
-  section P2 · Chart
-  Library chart hnq-common      :p2a, after p1d, 4d
-  webservice + chuyển 9 service :p2b, after p2a, 6d
-  datastore + chuyển 5 storage  :p2c, after p2b, 5d
+  section T3 · Service
+  registry + ApplicationSet      :c1, after b2, 2d
+  5 storage + push-notify        :c2, after c1, 3d
 
-  section P3 · Vận hành
-  Sealed Secrets                :p3a, after p2c, 3d
-  Tự động image tag             :p3b, after p3a, 2d
-  Kéo service lạc về GitOps     :p3c, after p3a, 2d
+  section T4 · Ứng dụng
+  4 clinic + outline             :d1, after c2, 3d
+  Sealed Secrets + secret thật   :d2, after d1, 2d
 
-  section P4 · Lưu trữ
-  Chuẩn hoá path + local PV     :p4a, after p3b, 5d
-  Velero + test restore         :p4b, after p4a, 3d
+  section T5 · Vận hành
+  Velero + test restore          :e1, after d2, 2d
+  Monitoring + alert             :e2, after e1, 2d
+  Runbook + onboarding           :e3, after e2, 1d
 
-  section P5 · Backend API
-  Nền tảng + Git layer          :p5a, after p3c, 5d
-  Catalog + Preview API         :p5b, after p5a, 5d
-  Deploy + Promote API          :p5c, after p5b, 5d
-  Secret API + RBAC + audit     :p5d, after p5c, 5d
+  section T6 · Tuỳ chọn
+  make new-service               :f1, after e3, 1d
+  Platform API (nếu cần)         :f2, after f1, 4d
 ```
 
-### Phase 0 — An toàn trước (1 tuần)
+### Tuần 1 — Nền
 
-**Không đổi kiến trúc gì cả.** Mục tiêu là có lưới an toàn trước khi động vào.
+- [ ] Dựng k3s trên server mới, gắn label node, tạo `/srv/k3s/<env>/`
+- [ ] Cài ArgoCD: **tắt tài khoản `admin`**, bật GitHub OIDC, RBAC deny-by-default
+- [ ] Tạo repo GitHub, bật branch protection + CODEOWNERS
+- [ ] `.github/workflows/validate.yml` + `renovate.json`
+- [ ] `gitops/root.yaml` + 2 AppProject + 5 Application chart bên thứ ba
+- [ ] Cài Sealed Secrets, **backup sealing key ngay**
 
-- [ ] Dump toàn bộ state hiện tại: `kubectl get all,ing,pvc,secret,cm -A -o yaml` → lưu ngoài repo
-- [ ] Backup mọi secret đang có trong cluster
-- [ ] Backup data MariaDB / Postgres / MinIO / OpenSearch (dùng script sẵn có trong `scripts/`)
-- [ ] Thêm `.gitlab-ci.yml` tối thiểu (`yamllint` + `helm lint`) **trên cấu trúc hiện tại**
-- [ ] Sửa các lỗi ở [Phần 14](#phần-14--việc-làm-ngay-được)
-- [ ] **Ghi lại `helm template` của mọi chart hiện tại** → đây là **baseline** để so sánh ở mọi phase sau
+**Xong khi:** `kubectl -n argocd apply -f gitops/root.yaml` dựng được cert-manager, sealed-secrets, monitoring.
 
-> Baseline là thứ quan trọng nhất của phase này. Mọi thay đổi chart về sau đều phải chứng minh được: "render ra kết quả giống hệt baseline, trừ những chỗ tôi cố ý sửa".
+### Tuần 2 — Chart
 
-**Xong khi:** CI chạy xanh, có file baseline, backup đã test restore được.
+- [ ] `charts/hnq-common` — library chart + `helm unittest`
+- [ ] `charts/webservice` — HTTP service
+- [ ] `charts/datastore` — datastore một node
+- [ ] Sync waves trong library chart
+- [ ] `registry/schema/service.schema.json`
+- [ ] `ci/scripts/render-all.sh`, `check-secrets.sh`
 
-### Phase 1 — Lớp GitOps (2 tuần)
+**Xong khi:** `helm unittest` xanh, `helm template` ra manifest hợp lệ cho cả 2 chart.
 
-- [ ] Dựng cấu trúc thư mục mới, **để song song** với cấu trúc cũ
-- [ ] Viết `env/dev/defaults.yaml` và `env/prod/defaults.yaml` — hút hết phần trùng ra khỏi values khách hàng
-- [ ] Viết `registry/**/service.yaml` + `values-<env>.yaml` cho **mọi** service, kể cả những cái đang thiếu ở prod
-- [ ] Biến `gitops/bootstrap/` thành Helm chart, viết 3 AppProject + 3 ApplicationSet
-- [ ] **Kiểm chứng trước khi chuyển:** render từ đường mới → `dyff` với baseline Phase 0 → khác biệt phải đúng bằng những gì mình chủ ý sửa
-- [ ] Chuyển đổi theo quy trình ở [mục 13.1](#131--rủi-ro-lớn-nhất-applicationset-xoá-mất-workload-đang-chạy)
-- [ ] Xoá `infra/argocd/apps/**` cũ
+### Tuần 3 — Hạ tầng service
 
-**Xong khi:** `kubectl get app -n argocd` cho ra đúng danh sách tên như cũ, tất cả `Synced` + `Healthy`, và không có pod nào restart trong quá trình chuyển.
+- [ ] `gitops/bootstrap/appset-apps.yaml`
+- [ ] `registry/apps/` cho 5 storage: mariadb, postgres, redis, minio, opensearch
+- [ ] `registry/apps/push-notify/`
+- [ ] Tạo PV + StorageClass `local-storage`
 
-### Phase 2 — Gom chart (2,5 tuần)
+**Xong khi:** 6 service chạy ở dev, ArgoCD `Synced` + `Healthy`.
 
-- [ ] `charts/library/hnq-common` + test bằng `helm unittest`
-- [ ] `charts/apps/webservice`
-- [ ] Chuyển **từng service một, mỗi service một MR**: render → `dyff` với baseline → chỉ merge khi diff rỗng hoặc giải thích được từng dòng
-- [ ] Thứ tự: `server-control` (dev, ít rủi ro nhất) → `push-notify-v2` → 4 khách hàng → `outline`
-- [ ] `charts/apps/datastore`
-- [ ] Chuyển storage theo thứ tự rủi ro tăng dần: `redis` → `postgres` → `opensearch` → `minio` → `mariadb`
-- [ ] Xoá `templates/namespace.yaml` khỏi mọi chart
+### Tuần 4 — Ứng dụng
 
-**Xong khi:** chỉ còn 3 chart tự viết, template ~700 dòng, `dyff` rỗng với mọi service.
+- [ ] 4 clinic + outline vào registry
+- [ ] Tạo toàn bộ secret bằng `kubeseal`, commit vào `secrets/`
+- [ ] Bật prod cho những service đã ổn ở dev
+- [ ] `ci/scripts/promote.sh` + thử promote một service
 
-### Phase 3 — Vận hành (1,5 tuần)
+**Xong khi:** dev đầy đủ, prod chạy, promote hoạt động.
 
-- [ ] Cài Sealed Secrets controller, **backup sealing key ngay**
-- [ ] Chuyển toàn bộ secret sang SealedSecret
-- [ ] Thêm `gitleaks` vào CI
-- [ ] Tự động bump image tag cho dev
-- [ ] **Kéo `outline`, `gitlab-runner`, `coredns-ha` về GitOps** → xử lý Lỗi 2
-- [ ] **Bật monitoring + postgres + redis cho prod** → xử lý Lỗi 1
-- [ ] Viết `docs/RUNBOOK.md`, chuyển nội dung `helm/monitoring/issues.md` vào đó
+### Tuần 5 — Vận hành
 
-### Phase 4 — Lưu trữ (1,5 tuần)
+- [ ] Velero + lịch backup + **test restore thật**
+- [ ] kube-prometheus-stack: dashboard + alert cơ bản (pod restart, disk, cert sắp hết hạn)
+- [ ] `docs/RUNBOOK.md` — sự cố thường gặp và cách xử lý
+- [ ] `docs/ONBOARDING.md` — người mới đọc 1 lần là làm được
 
-- [ ] Chuẩn hoá `/srv/k3s/<env>/...` trên mọi node
-- [ ] Chuyển `hostPath` sang `local` PV + StorageClass
-- [ ] Velero + lịch backup + **test restore thật một lần**
+**Xong khi:** restore thử thành công, alert gửi về được nơi 3 người cùng thấy.
 
-### Phase 5 — Backend API (4 tuần, chạy song song từ Phase 3)
+### Tuần 6 — Tuỳ chọn
 
-Chi tiết ở [PLATFORM_API_PLAN.md](./PLATFORM_API_PLAN.md).
+- [ ] `make new-service` — scaffold CLI (1 ngày, **nên làm**)
+- [ ] Platform API — chỉ làm nếu thấy thật sự cần, xem [PLATFORM_API_PLAN.md](./PLATFORM_API_PLAN.md)
 
-> **Nếu gấp:** Phase 0 + Phase 1 (3 tuần) đã xử lý được khoảng 70% vấn đề — hết copy tay, hết drift dev/prod, hết lỗi thiếu app ở prod. Phase 2–4 là tối ưu và giảm nợ kỹ thuật. Phase 5 là tính năng mới.
+> **Lời khuyên thật lòng:** làm `make new-service` trước, dùng 2–3 tháng. Nếu đội 3 người vẫn thấy khó chịu khi thêm service thì hãy xây API. Rất có thể script là đủ.
 
 ---
 
-## Phần 13 — Rủi ro
+## 12. Những gì cố tình KHÔNG làm
 
-### 13.1. 🔴 Rủi ro lớn nhất: ApplicationSet xoá mất workload đang chạy
+Phần này quan trọng ngang với phần làm gì. Mỗi mục dưới đây **đã được cân nhắc và quyết định bỏ** vì không xứng với quy mô 3 người.
 
-**Chuyện gì xảy ra.** Khi bạn xoá một `Application` có `resources-finalizer`, ArgoCD sẽ **xoá luôn mọi resource** mà nó quản: Deployment, Service, Ingress, và cả PVC nếu chart tạo PVC. Nếu ApplicationSet sau đó tạo lại Application cùng tên, bạn vẫn bị downtime — và với datastore thì có thể **mất data**.
+| Không làm | Vì sao | Khi nào nên xét lại |
+|---|---|---|
+| **2 branch dev/prod** | Không promote chọn lọc được. 1 branch + file values đạt cùng mục tiêu, đơn giản hơn. | Không bao giờ |
+| **Kargo** | Công cụ promotion chuyên dụng. Ngưỡng hữu ích là từ 3 môi trường. | Khi thêm `staging` |
+| **Backstage** | IDP đầy đủ, kèm Postgres + hệ plugin. Quá nặng cho 3 người. | Khi có >10 đội |
+| **4 vai trò phân quyền** | 3 người thì `developer` + `admin` là đủ. | Khi mở cho người ngoài đội |
+| **AppProject theo từng môi trường** | 6 project cho 3 người là bureaucracy. 2 project đủ giới hạn phạm vi thiệt hại. | Khi có đội ngoài deploy |
+| **Sync window** (chặn deploy ngoài giờ) | 3 người tự biết khi nào nên deploy. Thêm rào cản chỉ gây phiền lúc có sự cố. | Khi có ca trực và SLA |
+| **NetworkPolicy** | Chưa có mô hình đe doạ rõ ràng trong cluster. | Khi chạy workload của bên thứ ba |
+| **ArgoCD HA** | 1 replica đủ. ArgoCD chết thì cluster vẫn chạy, chỉ là không sync được. | Khi >100 Application |
+| **Longhorn** | Chậm khi node nối qua WAN. | Khi các node chung LAN |
+| **Progressive Sync** | Chỉ có ý nghĩa với nhiều cluster. | Khi có cluster thứ hai |
+| **kube-score** | Trùng phần lớn với `conftest` đã có. | Không cần |
+| **Mã hoá secret tại trình duyệt** | Chỉ có ý nghĩa khi có UI. 3 người dùng `kubeseal` là gọn nhất. | Khi xây Platform API |
+| **External Secrets Operator** | Cần Vault hoặc cloud secret manager. | Khi có cluster thứ hai hoặc cần xoay vòng tự động |
 
-**Quy trình chuyển đổi an toàn** — làm đúng theo thứ tự này:
+> Mỗi dòng ở đây tiết kiệm được vài ngày công và một thứ phải bảo trì mãi mãi. Với đội 3 người, **cái không xây là cái không hỏng**.
 
-```bash
-# ─── Bước 1: Gỡ finalizer khỏi TẤT CẢ Application cũ ───
-# Sau bước này, xoá Application sẽ KHÔNG xoá resource bên dưới
-kubectl -n argocd get applications.argoproj.io -o name | while read app; do
-  kubectl -n argocd patch "$app" --type=json \
-    -p='[{"op":"remove","path":"/metadata/finalizers"}]' 2>/dev/null || true
-done
+---
 
-# ─── Bước 2: Tắt auto-sync ở root app cũ ───
-# Tránh nó prune giữa chừng khi ta đang thao tác
-kubectl -n argocd patch app apps-dev  --type=merge -p '{"spec":{"syncPolicy":null}}'
-kubectl -n argocd patch app apps-prod --type=merge -p '{"spec":{"syncPolicy":null}}'
+## 13. Rủi ro
 
-# ─── Bước 3: Xoá root app cũ, KHÔNG cascade ───
-kubectl -n argocd delete app apps-dev  --cascade=orphan
-kubectl -n argocd delete app apps-prod --cascade=orphan
-
-# ─── Bước 4: Xoá Application con (finalizer đã gỡ → resource ở lại) ───
-kubectl -n argocd delete app --all
-
-# ─── Bước 5: XÁC NHẬN workload VẪN ĐANG CHẠY trước khi đi tiếp ───
-kubectl get pods -A | grep -v Running | grep -v Completed
-# Không có gì bất thường → mới sang bước 6
-
-# ─── Bước 6: Apply root app mới ───
-kubectl -n argocd apply -f gitops/root/dev.yaml
-kubectl -n argocd apply -f gitops/root/prod.yaml
-
-# ─── Bước 7: Kiểm tra ArgoCD ĐÃ NHẬN (adopt) resource cũ, không tạo mới ───
-kubectl get pods -A --sort-by=.status.startTime | tail -20
-# Pod không được restart → thành công
-```
-
-**Ba điều kiện bắt buộc để ArgoCD "nhận" được resource đang chạy:**
-
-| Điều kiện | Vì sao |
-|---|---|
-| **Tên Application mới phải trùng tên cũ** (`lotus-clinic-dev`, không thêm prefix) | ArgoCD định danh resource qua label `app.kubernetes.io/instance` |
-| **`releaseName` phải trùng** | Helm nhận diện release qua Secret `sh.helm.release.v1.<releaseName>.*` |
-| **`destination.namespace` phải trùng** | Khác namespace là resource khác |
-
-ApplicationSet ở mục 5.3 đã giữ đủ cả ba. Đây chính là lý do template dùng `{{ .metadata.name }}-{{ .env }}` chứ không thêm tiền tố gì.
-
-**Bắt buộc diễn tập trước.** Làm toàn bộ quy trình trên ở **dev trước**, xác nhận không có pod nào restart, rồi mới làm prod. Nếu có điều kiện, dựng một cụm k3d tạm để diễn tập lần đầu.
-
-### 13.2. Bảng rủi ro
+Vì xây mới nên rủi ro thấp hơn hẳn bản trước — không còn nguy cơ ArgoCD xoá mất workload đang chạy khi chuyển đổi.
 
 | Rủi ro | Khả năng | Mức độ | Cách giảm |
 |---|---|---|---|
-| ApplicationSet xoá workload | Trung bình | 🔴 Rất cao | Quy trình 13.1; diễn tập ở dev; `--cascade=orphan` |
-| Mất data khi đổi chart storage | Thấp | 🔴 Rất cao | `Retain` reclaim policy; backup + **test restore** trước; chuyển datastore cuối cùng |
-| Chart mới render khác chart cũ ngoài ý muốn | Cao | 🟠 Cao | `dyff` với baseline ở **mọi** MR; chuyển từng service một |
-| Mất sealing key Sealed Secrets | Thấp | 🟠 Cao | Backup key offline ngay khi cài; ghi vào runbook; kiểm tra định kỳ |
-| Quên escape `{{ }}` giữa Helm và ApplicationSet | Cao | 🟡 Trung bình | Job `bootstrap-template` trong CI (mục 10) |
-| `main` tụt lại quá xa `develop` | Trung bình | 🟡 Trung bình | Job `promotion-status` hằng ngày + endpoint `/promotions` |
-| Refactor kéo dài, repo nửa vời | Cao | 🟡 Trung bình | Mỗi phase kết thúc ở trạng thái chạy được; cũ/mới song song ở P1–P2 |
-| Backend API bị chiếm quyền | Thấp | 🔴 Rất cao | Xem [SECRET_MANAGEMENT.md](./SECRET_MANAGEMENT.md) — token Git chỉ push được nhánh `platform/*`, không đọc được secret trong cluster |
+| **Mất sealing key Sealed Secrets** | Thấp | 🔴 Cao | Backup ngay khi cài, cất 2 nơi ngoài cluster. Kiểm tra khôi phục ở Tuần 5. |
+| **Chưa test restore, tới lúc cần thì hỏng** | Trung bình | 🔴 Cao | Test restore là mục bắt buộc của Tuần 5, không được bỏ qua. |
+| `prune: true` ở dev xoá nhầm | Thấp | 🟡 Vừa | Dev có thể dựng lại. Prod đã đặt `prune: false`. |
+| ApplicationSet sinh Application sai tên | Trung bình | 🟡 Vừa | CI render toàn bộ trước khi merge |
+| Chỉ 1 người hiểu hệ thống | Trung bình | 🟠 Cao | `ONBOARDING.md` ở Tuần 5. Với 3 người, đây là rủi ro thật. |
+| Node chết, data local PV không truy cập được | Thấp | 🟠 Cao | Velero backup 6 giờ/lần. Chấp nhận mất tối đa 6 giờ dữ liệu. |
+| Quá tải vì làm cả 6 tuần cùng lúc | Cao | 🟡 Vừa | Mỗi tuần một phase, kết thúc ở trạng thái chạy được |
+
+### Điều đáng lo nhất với đội 3 người
+
+Không phải lỗi kỹ thuật, mà là **kiến thức tập trung vào một người**. Nếu chỉ một người hiểu ApplicationSet và library chart, thì lúc người đó nghỉ phép mà hệ thống có sự cố sẽ rất khó.
+
+Cách giảm — đưa vào lộ trình chứ không để tự phát:
+
+- `ONBOARDING.md` viết cho người chưa biết gì về ArgoCD
+- Mỗi người tự tay thêm ít nhất một service trong Tuần 4
+- `RUNBOOK.md` ghi từng sự cố gặp phải và cách đã xử lý
+- Ưu tiên thứ đơn giản dễ hiểu hơn thứ tối ưu khó hiểu — đây chính là lý do [Phần 12](#12-những-gì-cố-tình-không-làm) tồn tại
 
 ---
 
-## Phần 14 — Việc làm ngay được
-
-Những việc dưới đây **không phụ thuộc refactor**, làm trong Phase 0. Tổng cộng dưới 1 ngày công.
-
-| # | Việc | Vì sao | Thời gian |
-|---|---|---|---|
-| 1 | **Thêm `monitoring`, `storage-postgres`, `storage-redis` vào `apps/prod/platform/`** | Prod đang **không có monitoring** — sự cố xảy ra không ai biết | 30 phút |
-| 2 | **Điều tra `imagePullSecrets: lotus-clinic-registry` ở cả 4 khách hàng** | Hoặc secret bị đặt tên sai, hoặc 3 khách hàng dùng credential của khách hàng khác | 30 phút |
-| 3 | **Thống nhất `repoURL`** — chọn HTTPS hoặc SSH cho cả dev lẫn prod | ArgoCD đang coi là 2 repo, 2 bộ credential | 15 phút |
-| 4 | **Tạo Application cho `outline`, `gitlab-runner`, `coredns-ha`** | Đang chạy ngoài GitOps, mất cluster là mất luôn | 1 giờ |
-| 5 | **Xoá `hnq_svc.json`** | File rác rỗng ở thư mục gốc | 1 phút |
-| 6 | **Làm rõ `tolerations: []` ở `giaan-clinic/values-dev.yaml`** | Khác 3 khách hàng còn lại, không rõ cố ý hay quên | 15 phút |
-| 7 | **Sửa `README.md`** — bỏ phần `envs/` và `infra/ci/` không tồn tại | Tài liệu sai làm người mới hiểu nhầm hoàn toàn về repo | 1 giờ |
-| 8 | **Cập nhật `ARCHITECTURE.md`** — bổ sung node `server02` | Values trỏ vào node không có trong tài liệu | 30 phút |
-| 9 | **Thêm `.gitlab-ci.yml` tối thiểu** (`yamllint` + `helm lint`) | Chặn YAML hỏng ngay từ hôm nay | 1 giờ |
-| 10 | **Tạo `docs/RUNBOOK.md`**, chuyển `helm/monitoring/issues.md` vào | Kiến thức xử lý sự cố đang nằm rải rác | 1 giờ |
-
-Trong đó **#1 và #2 là vấn đề production thật**, nên làm trước tiên.
-
----
-
-## Phụ lục A — Ánh xạ file cũ sang mới
-
-| Hiện tại | Sau refactor |
-|---|---|
-| `infra/argocd/bootstrap/{dev,prod}/root-app.yaml` | `gitops/root/{dev,prod}.yaml` |
-| `infra/argocd/apps/{dev,prod}/clients/*.yaml` (8 file) | `gitops/bootstrap/templates/appset-tenants.yaml` (1) + `registry/tenants/*/service.yaml` |
-| `infra/argocd/apps/{dev,prod}/platform/*.yaml` (17 file) | `gitops/bootstrap/templates/appset-platform.yaml` (1) + `registry/platform/*/service.yaml` |
-| `infra/argocd/apps/{dev,prod}/admin/*.yaml` | gộp vào `appset-platform` + `registry/platform/{outline,server-control}/` |
-| `infra/argocd/manifests/platform/**` | `gitops/manifests/**` |
-| `infra/helm/clients/obgyn-clinic-service/templates/` | `charts/apps/webservice/` (dùng chung) |
-| `infra/helm/clients/obgyn-clinic-service/<tên>/values-*.yaml` | `registry/tenants/<tên>/values-*.yaml` (ngắn hơn ~5 lần) |
-| `infra/helm/platform/storage/*/templates/` (5 bộ) | `charts/apps/datastore/` (1 bộ) |
-| `infra/helm/platform/storage/*/values-*.yaml` | `registry/platform/storage-*/values-*.yaml` |
-| `infra/helm/platform/message/push-notify*/` | `charts/apps/webservice` + `registry/platform/push-notify*/` |
-| `infra/helm/admin/{server-control,outline}/` | `charts/apps/webservice` + `registry/platform/{server-control,outline}/` |
-| `infra/helm/cicd/{argocd,gitlab-runner}/` | `charts/vendor/{argo-cd,gitlab-runner}/` |
-| `infra/helm/monitoring/kube-prometheus-stack/` | `charts/vendor/kube-prometheus-stack/` |
-| `infra/helm/*/*/secret.example.yaml` | `secrets/<env>/<service>/*.yaml` (SealedSecret) + `secrets/README.md` |
-| `infra/scripts/**` | `scripts/**` |
-| `infra/helm/monitoring/issues.md` | `docs/RUNBOOK.md` |
-| `hnq_svc.json` | ❌ xoá |
-| `README.md` (phần `envs/`) | ❌ bỏ — mô tả layout server, không thuộc repo này |
-
-## Phụ lục B — Makefile
+## Phụ lục A — Makefile
 
 ```makefile
-.PHONY: help new-service validate render diff lint promote status
+.PHONY: help new-service validate render lint promote secret
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-	  awk 'BEGIN {FS=":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+	  awk 'BEGIN {FS=":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-new-service:  ## Tạo service mới: make new-service NAME=x CHART=apps/webservice
+new-service:  ## Tạo service mới: make new-service NAME=x CHART=webservice
 	@ci/scripts/new-service.sh "$(NAME)" "$(CHART)"
 
 validate:     ## Chạy đủ bộ kiểm tra như CI
@@ -1304,26 +1050,49 @@ validate:     ## Chạy đủ bộ kiểm tra như CI
 render:       ## Render mọi service × mọi môi trường
 	@ci/scripts/render-all.sh
 
-diff:         ## So sánh render hiện tại với baseline
-	@ci/scripts/render-all.sh > /tmp/new.yaml
-	@dyff between ci/baseline.yaml /tmp/new.yaml
+lint:         ## helm lint + unittest
+	@for c in charts/webservice charts/datastore; do helm lint $$c && helm unittest $$c; done
 
 promote:      ## Đưa image dev lên prod: make promote NAME=lotus-clinic
 	@ci/scripts/promote.sh "$(NAME)"
 
-status:       ## Xem hàng chờ lên prod
-	@ci/scripts/promotion-status.sh
+secret:       ## Mã hoá secret: make secret SVC=x ENV=prod KEY=DB_PASSWORD
+	@ci/scripts/seal-secret.sh "$(SVC)" "$(ENV)" "$(KEY)"
+```
 
-lint:         ## helm lint mọi chart
-	@for c in charts/apps/* charts/vendor/*; do helm lint "$$c"; done
+## Phụ lục B — Việc cần làm khi dựng server mới
+
+```bash
+# 1. k3s — đặt tên node rõ ràng ngay từ đầu
+curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--node-name=hnq-01" sh -
+
+# 2. Label node theo vai trò, KHÔNG theo hostname
+kubectl label node hnq-01 hnq.dev/workload=prod hnq.dev/storage=true
+
+# 3. Thư mục dữ liệu
+sudo mkdir -p /srv/k3s/{dev,prod}
+sudo chmod 755 /srv/k3s
+
+# 4. ArgoCD
+helm repo add argo https://argoproj.github.io/argo-helm
+helm install argocd argo/argo-cd -n argocd --create-namespace \
+  -f gitops/install/argocd-values.yaml     # đã tắt admin, bật OIDC
+
+# 5. Bootstrap — lệnh cuối cùng phải gõ tay
+kubectl -n argocd apply -f gitops/root.yaml
+
+# 6. Sealed Secrets đã được root.yaml cài. Backup key NGAY:
+kubectl -n kube-system get secret \
+  -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml \
+  > ~/sealing-key-backup.yaml
+# → cất vào password manager, rồi shred file này
 ```
 
 ## Phụ lục C — Tham khảo
 
-- ApplicationSet, Matrix generator và `elementsYaml` — https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/Generators-Matrix/
-- AppProject — https://argo-cd.readthedocs.io/en/stable/user-guide/projects/
-- Helm library chart — https://helm.sh/docs/topics/library_charts/
-- Sealed Secrets — https://github.com/bitnami-labs/sealed-secrets
-- kubeconform — https://github.com/yannh/kubeconform
-- conftest / OPA — https://www.conftest.dev/
-- dyff (so sánh YAML theo ngữ nghĩa) — https://github.com/homeport/dyff
+- [RESEARCH_BEST_PRACTICES.md](./RESEARCH_BEST_PRACTICES.md) — cơ sở cho mọi quyết định ở Phần 1
+- [ApplicationSet Matrix generator](https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/Generators-Matrix/)
+- [Helm library chart](https://helm.sh/docs/topics/library_charts/)
+- [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets)
+- [k3s — Volumes and Storage](https://docs.k3s.io/add-ons/storage)
+- [kubeconform](https://github.com/yannh/kubeconform) · [conftest](https://www.conftest.dev/) · [Renovate](https://docs.renovatebot.com/)

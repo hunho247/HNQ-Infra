@@ -4,7 +4,26 @@
 |---|---|
 | **Ngày tra cứu** | 11/09/2026 |
 | **Mục đích** | Đối chiếu kế hoạch trong [REFACTOR_PLAN.md](./REFACTOR_PLAN.md) với thực tiễn cộng đồng |
-| **Trạng thái** | Để bạn xem và quyết định — **chưa áp dụng vào plan** |
+| **Trạng thái** | ✅ Đã áp dụng vào plan — xem bảng ngay dưới |
+
+---
+
+## Trạng thái áp dụng
+
+> **Cập nhật 11/09/2026 —** [REFACTOR_PLAN.md](./REFACTOR_PLAN.md) đã được viết lại theo tài liệu này, trong bối cảnh mới: **xây mới trên server + repo GitHub mới, đội 3 người**.
+
+| Phát hiện | Quyết định |
+|---|---|
+| Branch-per-environment là anti-pattern | ✅ **Đã theo** — chuyển sang 1 branch `main`, môi trường tách bằng file values |
+| App-of-Apps + ApplicationSet dùng chung | ✅ **Đã theo** — ApplicationSet cho service của mình, Application tường minh cho chart bên thứ ba |
+| `prune: false` ở prod | ✅ **Đã theo** |
+| Sync waves | ✅ **Đã theo** — đưa vào library chart |
+| Renovate, tắt tài khoản `admin`, Trivy, `helm-unittest`, backup namespace `argocd` | ✅ **Đã theo** — vào Tuần 1–5 |
+| Sealed Secrets → ESO là lộ trình đúng | ✅ **Giữ nguyên** |
+| Hoãn Longhorn khi node nối qua WAN | ✅ **Giữ nguyên** |
+| Kargo | ⏸ **Hoãn** — ngưỡng hữu ích là từ 3 môi trường |
+| Backstage | ⏸ **Hoãn** — quá nặng cho 3 người |
+| Sync window, NetworkPolicy, ArgoCD HA, kube-score, Progressive Sync | ❌ **Bỏ** — xem [REFACTOR_PLAN §12](./REFACTOR_PLAN.md#12-những-gì-cố-tình-không-làm) |
 
 ---
 
