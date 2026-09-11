@@ -5,7 +5,7 @@
 | **Trạng thái** | Bản nháp, chờ duyệt |
 | **Ngày** | 11/09/2026 |
 | **Bối cảnh** | Hệ thống mới, đội 3 người, repo GitHub, 1 branch `main` |
-| **Liên quan** | [REFACTOR_PLAN.md](./REFACTOR_PLAN.md) · [PLATFORM_API_PLAN.md](./PLATFORM_API_PLAN.md) |
+| **Liên quan** | [REFACTOR_PLAN.md](./REFACTOR_PLAN.md) · [K3S_OPERATIONS.md](./K3S_OPERATIONS.md) |
 
 ---
 
@@ -15,7 +15,7 @@
 
 Với đội 3 người mà ai cũng có quyền vào cluster, quy trình gọn nhất là **dùng `kubeseal` ở máy mình** — bản rõ không đi qua hệ thống nào khác. Không cần backend, không cần UI, không có bề mặt tấn công mới.
 
-Phần quản lý secret qua UI chỉ có ý nghĩa khi bạn xây [Platform API](./PLATFORM_API_PLAN.md). Thiết kế cho trường hợp đó nằm ở [Phần 5](#5-khi-có-platform-api).
+Không có UI quản lý secret, và đó là quyết định có chủ ý: thêm một đường cho secret đi qua là thêm một chỗ có thể rò rỉ, đổi lại tiện lợi mà 3 người không thật sự cần.
 
 ---
 
@@ -25,10 +25,9 @@ Phần quản lý secret qua UI chỉ có ý nghĩa khi bạn xây [Platform API
 - [2. Quy trình hằng ngày](#2-quy-trình-hằng-ngày)
 - [3. Sao lưu sealing key](#3-sao-lưu-sealing-key--phần-quan-trọng-nhất)
 - [4. Khai báo secret trong registry](#4-khai-báo-secret-trong-registry)
-- [5. Khi có Platform API](#5-khi-có-platform-api)
-- [6. Xoay vòng secret](#6-xoay-vòng-secret)
-- [7. Khi nghi ngờ bị lộ](#7-khi-nghi-ngờ-bị-lộ)
-- [8. Danh sách kiểm tra](#8-danh-sách-kiểm-tra)
+- [5. Xoay vòng secret](#5-xoay-vòng-secret)
+- [6. Khi nghi ngờ bị lộ](#6-khi-nghi-ngờ-bị-lộ)
+- [7. Danh sách kiểm tra](#7-danh-sách-kiểm-tra)
 
 ---
 
@@ -209,7 +208,7 @@ Ba tác dụng:
 
 1. **CI phát hiện thiếu** trước khi deploy hỏng
 2. **Người mới** nhìn một file là biết cần chuẩn bị gì
-3. **Sinh form** nếu sau này có Platform API
+3. **Kiểm tra trước khi bật môi trường mới** — chưa đủ secret thì chưa cho bật prod
 
 ```bash
 #!/usr/bin/env bash
@@ -230,123 +229,7 @@ exit $FAIL
 
 ---
 
-## 5. Khi có Platform API
-
-Phần này **chỉ áp dụng nếu bạn xây [Platform API](./PLATFORM_API_PLAN.md)**. Chưa xây thì bỏ qua — quy trình `kubeseal` ở Phần 2 đã đủ và an toàn hơn.
-
-### Mối lo cần giải
-
-Thêm backend nghĩa là thêm một con đường cho secret đi qua: trình duyệt → backend → Git. Câu hỏi phải trả lời: **backend bị chiếm quyền thì mất gì?**
-
-### Câu trả lời: không mất gì, nhờ 4 hàng rào
-
-#### Hàng rào 1 — Bản rõ không bao giờ tới backend
-
-Trình duyệt mã hoá bằng public key **trước khi** gửi đi. Backend chỉ nhận chuỗi đã mã hoá.
-
-```mermaid
-sequenceDiagram
-  actor U as Người dùng
-  participant B as Trình duyệt
-  participant API as Platform API
-  participant GH as GitHub
-
-  B->>API: GET /secrets/public-key
-  API-->>B: certificate (công khai)
-
-  Note over B: 🔒 Bản rõ KHÔNG rời trình duyệt
-  U->>B: nhập DB_PASSWORD
-  B->>B: mã hoá bằng WebCrypto
-  B->>B: xoá bản rõ khỏi bộ nhớ
-
-  B->>API: PUT /secrets { sealed: "AgBv7Kq..." }
-  Note over API: chỉ thấy chuỗi đã mã hoá
-  API->>GH: tạo branch + mở PR
-```
-
-> ⚠️ Tự viết code mã hoá là việc dễ sai. **Không bật tính năng này cho người dùng** cho tới khi có bộ test đối chiếu output với `kubeseal` thật (seal bằng JS → apply vào cluster test → so với bản rõ ban đầu, gồm cả Unicode, chuỗi rỗng, và nội dung nhị phân).
->
-> Cho tới lúc đó, UI chỉ cần hiển thị **lệnh `kubeseal` đã điền sẵn namespace và tên** để người dùng copy, rồi dán kết quả vào. Đơn giản, không rủi ro, và với 3 người thì hoàn toàn chấp nhận được.
-
-#### Hàng rào 2 — Backend không đọc được secret trong cluster
-
-ServiceAccount **cố ý không có** quyền nào trên `secrets`:
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: platform-api
-rules:
-  - apiGroups: [""]
-    resources: [pods, services, events, configmaps, pods/log]
-    verbs: [get, list, watch]
-  - apiGroups: [apps]
-    resources: [deployments, statefulsets]
-    verbs: [get, list, watch]
-  - apiGroups: [argoproj.io]
-    resources: [applications]
-    verbs: [get, list, watch]
-
-  # ❌ KHÔNG có quyền nào trên "secrets"
-  # ❌ KHÔNG có create / update / delete trên bất cứ thứ gì
-```
-
-Kiểm chứng sau khi deploy:
-
-```bash
-SA=system:serviceaccount:platform-api-prod:platform-api
-kubectl auth can-i get    secrets     --as=$SA -A   # phải là "no"
-kubectl auth can-i create deployments --as=$SA -A   # phải là "no"
-kubectl auth can-i get    pods        --as=$SA -A   # phải là "yes"
-```
-
-#### Hàng rào 3 — Backend không push được vào `main`
-
-Nhờ quyết định Q2 trong [REFACTOR_PLAN](./REFACTOR_PLAN.md#1-bảy-quyết-định-nền-tảng) (mọi thay đổi qua PR), backend **chỉ cần quyền tạo branch và mở PR**. Không bao giờ cần push vào `main`.
-
-GitHub App của backend cấp quyền:
-
-| Quyền | Mức |
-|---|---|
-| Contents | Write *(để tạo branch)* |
-| Pull requests | Write |
-| **`main`** | Protected — chỉ merge qua PR + 1 approval |
-
-Kẻ chiếm được backend chỉ **mở được PR**. Muốn vào cluster vẫn cần một con người nhìn diff rồi bấm duyệt.
-
-#### Hàng rào 4 — Không có API nào trả về giá trị secret
-
-Không cho admin, không cho ai. Chỉ đọc được metadata:
-
-```json
-{
-  "name": "lotus-clinic-backend",
-  "keys": ["DB_PASSWORD", "JWT_SECRET"],
-  "updatedAt": "2026-09-10T14:23:11Z",
-  "updatedBy": "nguyen.van.a"
-}
-```
-
-Và ba quy tắc trong code:
-
-- Không log body của route `/secrets` — dùng **danh sách trắng** (chỉ log trường được liệt kê), không phải danh sách đen kiểu "che trường tên là password" (luôn sót)
-- Không lưu giá trị vào database — schema không có cột nào chứa được
-- Thông báo lỗi không chứa dữ liệu đầu vào
-
-### Tổng kết: backend bị chiếm thì sao?
-
-| Kẻ tấn công muốn | Được không | Bị chặn bởi |
-|---|---|---|
-| Đọc secret hiện có | ❌ | Hàng rào 2 |
-| Đọc secret đang được nhập | ❌ | Hàng rào 1 |
-| Deploy image độc hại lên prod | ❌ | Hàng rào 3 |
-| Sửa thẳng resource trong cluster | ❌ | Hàng rào 2 |
-| Mở PR độc hại | ✅ | Nhưng cần người duyệt, diff hiện rõ |
-
----
-
-## 6. Xoay vòng secret
+## 5. Xoay vòng secret
 
 ### Vấn đề dễ quên: pod không tự nhận giá trị mới
 
@@ -379,7 +262,7 @@ Script `seal-secret.sh` cập nhật `secretChecksum` trong `values-<env>.yaml` 
 
 ---
 
-## 7. Khi nghi ngờ bị lộ
+## 6. Khi nghi ngờ bị lộ
 
 ### Bước 1 — Vô hiệu hoá ngay, đừng chờ điều tra
 
@@ -416,7 +299,7 @@ Vào `docs/RUNBOOK.md`: lộ thế nào, phát hiện ra sao, và **đổi gì �
 
 ---
 
-## 8. Danh sách kiểm tra
+## 7. Danh sách kiểm tra
 
 ### Khi dựng hệ thống (Tuần 1)
 
@@ -433,15 +316,13 @@ Vào `docs/RUNBOOK.md`: lộ thế nào, phát hiện ra sao, và **đổi gì �
 - [ ] Kết quả ghi vào `docs/RUNBOOK.md`
 - [ ] Đã đặt lịch nhắc backup lại key hằng quý
 
-### Chỉ khi xây Platform API
+### Nếu sau này thêm bất kỳ tự động hoá nào chạm tới secret
 
-- [ ] `kubectl auth can-i get secrets --as=<SA>` trả về `no`
-- [ ] `kubectl auth can-i create deployments --as=<SA>` trả về `no`
-- [ ] GitHub App không push được vào `main` — đã thử thật
-- [ ] Không endpoint nào trả về giá trị secret — đã rà toàn bộ route
-- [ ] Middleware log dùng danh sách trắng — đã test với payload chứa secret
-- [ ] Thông báo lỗi không chứa dữ liệu đầu vào — đã test
-- [ ] **Nếu bật mã hoá tại trình duyệt:** bộ test đối chiếu với `kubeseal` đã xanh
+Ba ràng buộc không được phá, bất kể công cụ gì:
+
+- [ ] ServiceAccount của nó **không có** quyền nào trên `secrets` — kiểm bằng `kubectl auth can-i get secrets --as=<SA> -A` (phải là `no`)
+- [ ] Token Git của nó **không push được** vào `main` — đã thử thật
+- [ ] Nó **không bao giờ** nhận secret bản rõ — chỉ nhận dữ liệu đã seal
 
 ---
 

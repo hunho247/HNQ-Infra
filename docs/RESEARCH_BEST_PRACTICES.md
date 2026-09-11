@@ -22,8 +22,10 @@
 | Sealed Secrets → ESO là lộ trình đúng | ✅ **Giữ nguyên** |
 | Hoãn Longhorn khi node nối qua WAN | ✅ **Giữ nguyên** |
 | Kargo | ⏸ **Hoãn** — ngưỡng hữu ích là từ 3 môi trường |
-| Backstage | ⏸ **Hoãn** — quá nặng cho 3 người |
+| Backstage / portal tự viết | ❌ **Bỏ** — ArgoCD UI + k9s + script đã phủ hết |
 | Sync window, NetworkPolicy, ArgoCD HA, kube-score, Progressive Sync | ❌ **Bỏ** — xem [REFACTOR_PLAN §12](./REFACTOR_PLAN.md#12-những-gì-cố-tình-không-làm) |
+
+Phần vận hành hằng ngày (k9s, stern, Tailscale Operator, số lượng alert, nâng cấp k3s, backup) được tra cứu riêng và viết thành [K3S_OPERATIONS.md](./K3S_OPERATIONS.md) — nguồn nằm ở cuối tài liệu đó.
 
 ---
 
@@ -341,7 +343,7 @@ Bạn có **2 môi trường**. Theo tiêu chí này thì **chưa tới ngưỡn
 | HA cho ArgoCD | ⚠️ Chưa — hiện 1 replica, chấp nhận được ở quy mô này |
 | **Sync window** cho quản lý thay đổi | ➕ **Thiếu** — xem [Phần 3](#3--chính-sách-sync) |
 | Backup ArgoCD tự động | ➕ **Thiếu** — cần backup `argocd` namespace, đưa vào Velero (Phase 4) |
-| Audit log | ✅ Có ở Platform API |
+| Audit log | ✅ Lịch sử Git + audit log của ArgoCD |
 
 ### ➕ Sync waves — thiếu hẳn trong plan
 
@@ -431,23 +433,24 @@ Công sức: ~2 giờ cấu hình. Giá trị: cao.
 
 > *"Backstage's Software Templates (scaffolder) allows platform teams to define wizard-style templates in YAML that collect parameters from developers (service name, language, team owner) and execute a sequence of actions: fetching a repository skeleton, rendering it with the provided values, creating a repository, registering the component in the catalog, and **optionally opening a pull request**."*
 
-Đây đúng là luồng đã thiết kế trong [PLATFORM_API_PLAN.md](./PLATFORM_API_PLAN.md): form → validate schema → render template → mở MR. Nghĩa là **hướng thiết kế backend đang đi đúng chuẩn ngành**, chỉ là tự viết thay vì dùng Backstage.
+Đây đúng là luồng mà `make new-service` làm: khuôn mẫu → render → mở PR. Nghĩa là **hướng đi đúng chuẩn ngành** — chỉ khác là bằng script thay vì bằng portal.
 
-### Tự viết hay dùng Backstage?
+### Tự viết portal, dùng Backstage, hay không làm gì cả?
 
-| | Tự viết (`platform-api`) | Backstage |
-|---|---|---|
-| Công sức ban đầu | 4 tuần | 2–3 tuần cấu hình |
-| Phải nuôi thêm | Không (1 pod Node) | Backstage + Postgres, khá nặng |
-| Tuỳ biến | Toàn quyền | Trong khuôn khổ plugin |
-| Phù hợp quy mô | ✅ 4 khách hàng, đội nhỏ | Hợp với >10 đội |
-| Có sẵn catalog, docs, plugin | ❌ Tự làm | ✅ Rất nhiều |
+| | Không làm gì (script + ArgoCD UI) | Tự viết portal | Backstage |
+|---|---|---|---|
+| Công sức | **2 ngày** | 3,5 tuần | 2–3 tuần cấu hình |
+| Phải nuôi thêm | Không | 1 app Node + token Git + SQLite | Backstage + Postgres |
+| Xem trạng thái | ArgoCD UI (đã có sẵn) | Tự viết lại | Có plugin |
+| Phù hợp 3 người | ✅ **Khuyến nghị** | Khi có người ngoài đội cần deploy | >10 đội |
 
-Ở quy mô của bạn, **tự viết vẫn là lựa chọn hợp lý** — Backstage mang theo nhiều thứ bạn chưa cần. Khái niệm cần mượn từ Backstage là **"golden path"**:
+**Quyết định: không xây portal.** ArgoCD UI đã có danh sách Application, sync/health, cây resource, log pod, diff và nút sync — tức là phần lớn thứ một portal tự viết sẽ làm lại. Khoảng trống thật duy nhất là bảng so tag dev ↔ prod, và đó là [một script 30 dòng](./K3S_OPERATIONS.md#5-makefile--lệnh-hằng-ngày).
+
+Thứ đáng mượn từ Backstage không phải phần mềm, mà là khái niệm **"golden path"**:
 
 > *"A golden path is an opinionated, well-maintained workflow that encodes platform team best practices... A Golden Path isn't a mandate. It's the path of least resistance to doing the right thing."*
 
-Nghĩa là: `make new-service` và form trên UI phải tạo ra thứ **đã đúng sẵn** (có resource limits, có probe, có ServiceMonitor, có khai báo secret) — để làm đúng dễ hơn làm sai.
+Nghĩa là khuôn mẫu của `make new-service` phải tạo ra thứ **đã đúng sẵn** — có resource limits, có probe, có ServiceMonitor, có khai báo secret. Làm đúng phải dễ hơn làm sai.
 
 ---
 
@@ -476,7 +479,7 @@ Nghĩa là: `make new-service` và form trên UI phải tạo ra thứ **đã đ
 | 19 | `trivy` quét image | ➕ | 🟠 | Thêm vào Phase 0 |
 | 20 | `kube-score` | ➕ | 🟠 | Tuỳ chọn |
 | 21 | **Renovate tự nâng phiên bản chart** | ➕ | 🟠 | **Thêm vào Phase 0** — giá trị cao, công sức thấp |
-| 22 | Backstage = chuẩn thị trường, nhưng tự viết vẫn hợp quy mô | ✅ | 🟢 | Giữ nguyên hướng |
+| 22 | Backstage = chuẩn thị trường | ❌ **Bỏ** | 🟢 | Không xây portal — ArgoCD UI + script đã đủ |
 | 23 | Khái niệm "golden path" | ➕ | 🟢 | Đưa vào thiết kế scaffold |
 
 ---

@@ -7,7 +7,7 @@
 | **Bối cảnh** | Xây **mới hoàn toàn** trên server mới + repo GitHub mới. Không migrate dữ liệu cũ. |
 | **Quy mô đội** | 3 người vận hành |
 | **Cơ sở** | [RESEARCH_BEST_PRACTICES.md](./RESEARCH_BEST_PRACTICES.md) |
-| **Liên quan** | [PLATFORM_API_PLAN.md](./PLATFORM_API_PLAN.md) · [SECRET_MANAGEMENT.md](./SECRET_MANAGEMENT.md) |
+| **Liên quan** | [K3S_OPERATIONS.md](./K3S_OPERATIONS.md) · [SECRET_MANAGEMENT.md](./SECRET_MANAGEMENT.md) |
 
 ---
 
@@ -54,7 +54,7 @@ Kết quả: kế hoạch ngắn hơn, ít bước hơn, và **6 tuần thay vì
 | **Q4** | **Sealed Secrets.** | Rào cản thấp nhất, không cần hệ thống ngoài. Lộ trình chuẩn là bắt đầu ở đây. ([Research §5](./RESEARCH_BEST_PRACTICES.md#5--secret)) |
 | **Q5** | **Prod: `selfHeal: true`, `prune: false`.** Dev: cả hai `true`. | `selfHeal` chống chỉnh tay vào cluster. `prune: false` ở prod để một lỗi ApplicationSet không xoá hàng loạt. ([Research §3](./RESEARCH_BEST_PRACTICES.md#3--chính-sách-sync)) |
 | **Q6** | **Node chọn bằng label, không bằng hostname.** | Server mới = cơ hội làm đúng. Đổi node không phải sửa values. |
-| **Q7** | **Platform API là tuỳ chọn, làm sau cùng.** Bắt buộc chỉ có `make new-service`. | Với 3 người, script CLI giải quyết 80% nhu cầu. Chỉ xây API khi thấy đau thật. |
+| **Q7** | **Không xây web UI/API riêng.** Dùng ArgoCD UI + k9s + script. | ArgoCD UI đã có danh sách app, sync/health, log, diff, nút sync. Xây lại là phí. Xem [K3S_OPERATIONS](./K3S_OPERATIONS.md). |
 
 ### Năm nguyên tắc
 
@@ -443,7 +443,7 @@ flowchart TD
   LIB --> WS
   LIB --> DS
 
-  WS --> A["4 clinic · push-notify<br/>outline · platform-api"]
+  WS --> A["4 clinic · push-notify<br/>outline"]
   DS --> B["mariadb · postgres · redis<br/>minio · opensearch"]
 ```
 
@@ -557,7 +557,7 @@ Lợi ích:
 
 - Không cần token có quyền bypass protected branch
 - Mọi thay đổi đều có PR để xem lại, kể cả dev
-- Platform API sau này **chỉ cần quyền tạo branch + mở PR** — không bao giờ cần push vào `main`
+- Bất kỳ tự động hoá nào sau này cũng **chỉ cần quyền tạo branch + mở PR** — không bao giờ cần push vào `main`
 
 ### 6.4. CODEOWNERS
 
@@ -919,11 +919,12 @@ gantt
   Runbook + onboarding           :e3, after e2, 1d
 
   section T6 · Tuỳ chọn
-  make new-service               :f1, after e3, 1d
-  Platform API (nếu cần)         :f2, after f1, 4d
+  make new-service + status.sh   :f1, after e3, 2d
 ```
 
 ### Tuần 1 — Nền
+
+> Phần dựng cluster có một quyết định **không sửa lại được sau này** — xem [K3S_OPERATIONS §2.1](./K3S_OPERATIONS.md#21-quyết-định-quan-trọng-nhất-datastore).
 
 - [ ] Dựng k3s trên server mới, gắn label node, tạo `/srv/k3s/<env>/`
 - [ ] Cài ArgoCD: **tắt tài khoản `admin`**, bật GitHub OIDC, RBAC deny-by-default
@@ -965,6 +966,8 @@ gantt
 
 ### Tuần 5 — Vận hành
 
+> Chi tiết từng mục ở [K3S_OPERATIONS.md](./K3S_OPERATIONS.md).
+
 - [ ] Velero + lịch backup + **test restore thật**
 - [ ] kube-prometheus-stack: dashboard + alert cơ bản (pod restart, disk, cert sắp hết hạn)
 - [ ] `docs/RUNBOOK.md` — sự cố thường gặp và cách xử lý
@@ -975,7 +978,7 @@ gantt
 ### Tuần 6 — Tuỳ chọn
 
 - [ ] `make new-service` — scaffold CLI (1 ngày, **nên làm**)
-- [ ] Platform API — chỉ làm nếu thấy thật sự cần, xem [PLATFORM_API_PLAN.md](./PLATFORM_API_PLAN.md)
+- [ ] `scripts/status.sh` — bảng tag dev ↔ prod, thứ ArgoCD UI không có ([K3S_OPERATIONS §5](./K3S_OPERATIONS.md#5-makefile--lệnh-hằng-ngày))
 
 > **Lời khuyên thật lòng:** làm `make new-service` trước, dùng 2–3 tháng. Nếu đội 3 người vẫn thấy khó chịu khi thêm service thì hãy xây API. Rất có thể script là đủ.
 
@@ -998,7 +1001,7 @@ Phần này quan trọng ngang với phần làm gì. Mỗi mục dưới đây 
 | **Longhorn** | Chậm khi node nối qua WAN. | Khi các node chung LAN |
 | **Progressive Sync** | Chỉ có ý nghĩa với nhiều cluster. | Khi có cluster thứ hai |
 | **kube-score** | Trùng phần lớn với `conftest` đã có. | Không cần |
-| **Mã hoá secret tại trình duyệt** | Chỉ có ý nghĩa khi có UI. 3 người dùng `kubeseal` là gọn nhất. | Khi xây Platform API |
+| **Web UI / API riêng để deploy** | ArgoCD UI + k9s + script đã phủ hết. Xây lại tốn 3,5 tuần và thành một app phải nuôi. | Khi có người ngoài 3 người cần deploy, hoặc >25 service |
 | **External Secrets Operator** | Cần Vault hoặc cloud secret manager. | Khi có cluster thứ hai hoặc cần xoay vòng tự động |
 
 > Mỗi dòng ở đây tiết kiệm được vài ngày công và một thứ phải bảo trì mãi mãi. Với đội 3 người, **cái không xây là cái không hỏng**.
