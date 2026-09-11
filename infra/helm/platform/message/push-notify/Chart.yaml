@@ -1,0 +1,6 @@
+apiVersion: v2
+name: push-notify
+description: Push notify service (l2c_notify_service)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: argocd
+description: Umbrella chart to install Argo CD via the official argo/argo-cd chart
+type: application
+version: 0.1.0
+appVersion: "2.x"
+dependencies:
+  - name: argo-cd
+    # Broad range so we can pick the latest compatible version at deploy time.
+    version: ">=5.53.0 <9.0.0"
+    repository: https://argoproj.github.io/argo-helm
+    alias: argocd

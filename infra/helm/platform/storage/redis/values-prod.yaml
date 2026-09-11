@@ -1,0 +1,21 @@
+global:
+  namespace: storage-redis-prod
+  env: prod
+
+persistence:
+  hostPath: /home/hnq/hnq_data/prod/platform/storage/redis
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 800m
+    memory: 256Mi
+
+nodeSelector:
+  kubernetes.io/hostname: hnq-server-vietnix-01-hjnu
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule

@@ -1,0 +1,10 @@
+apiVersion: v2
+name: kube-prometheus-stack
+description: Umbrella chart for Prometheus + Grafana monitoring stack
+type: application
+version: 0.1.0
+dependencies:
+  - name: kube-prometheus-stack
+    version: ">=65.0.0 <70.0.0"
+    repository: https://prometheus-community.github.io/helm-charts
+    alias: kube-prometheus-stack

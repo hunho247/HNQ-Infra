@@ -1,0 +1,49 @@
+global:
+  namespace: storage-redis
+  env: dev
+
+fullnameOverride: redis
+
+image:
+  repository: docker.io/library/redis
+  tag: "7.4.7"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 6379
+  annotations: {}
+
+auth:
+  enabled: true
+  existingSecret: redis-credentials
+  passwordKey: password
+  password: ""
+
+persistence:
+  enabled: true
+  hostPath: ""
+  mountPath: /data
+  size: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  storageClass: ""
+  existingClaim: ""
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+podAnnotations: {}
+podSecurityContext: {}
+securityContext: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

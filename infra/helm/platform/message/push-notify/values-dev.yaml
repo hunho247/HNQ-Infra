@@ -1,0 +1,6 @@
+global:
+  env: dev
+  namespace: push-notify-dev
+
+nodeSelector:
+  kubernetes.io/hostname: server02

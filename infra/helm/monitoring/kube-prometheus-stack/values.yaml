@@ -1,0 +1,67 @@
+kube-prometheus-stack:
+  alertmanager:
+    enabled: true
+    alertmanagerSpec:
+      configSecret: alertmanager-config
+
+  prometheus:
+    enabled: true
+    prometheusSpec:
+      serviceMonitorNamespaceSelector: {}
+      serviceMonitorSelector: {}
+      podMonitorNamespaceSelector: {}
+      podMonitorSelector: {}
+      ruleNamespaceSelector: {}
+      ruleSelector: {}
+      retention: 15d
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+        limits:
+          cpu: 1000m
+          memory: 2Gi
+
+  grafana:
+    enabled: true
+    defaultDashboardsEnabled: true
+    defaultDashboardsTimezone: Asia/Ho_Chi_Minh
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+  nodeExporter:
+    enabled: true
+
+  kubeStateMetrics:
+    enabled: true
+
+  # k3s embeds these components — no separate scrape targets exist
+  kubeScheduler:
+    enabled: false
+  kubeControllerManager:
+    enabled: false
+  kubeProxy:
+    enabled: false
+  kubeEtcd:
+    enabled: false
+
+  defaultRules:
+    rules:
+      # Disable alert rules for k3s embedded components (no scrape targets → absent() always fires)
+      kubeProxy: false
+      kubeControllerManager: false
+      kubeScheduler: false
+      kubeSchedulerAlerting: false
+      kubeSchedulerRecording: false
+      # Disable kubelet rule groups that fail PromQL eval in k3s (metric names differ from upstream)
+      kubelet: false
+      kubernetesSystem: false
+    disabled:
+      # Single-node homelab — no node to failover to, overcommit tolerance irrelevant
+      KubeCPUOvercommit: true
+      KubeMemoryOvercommit: true

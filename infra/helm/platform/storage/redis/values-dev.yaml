@@ -1,0 +1,12 @@
+global:
+  namespace: storage-redis-dev
+  env: dev
+
+replicaCount: 0
+
+persistence:
+  hostPath: /data/k3s/dev/platform/storage/redis
+  size: 2Gi
+
+nodeSelector:
+  kubernetes.io/hostname: server02

@@ -1,0 +1,60 @@
+global:
+  env: prod
+  namespace: push-notify-v2-prod
+
+app:
+  configFile: files/app/config_prod.yaml
+  configKey: config_prod.yaml
+
+api:
+  args:
+    - --config
+    - /app/configs/config_prod.yaml
+  env:
+    - name: APP_ENV
+      value: "prod"
+    - name: APP_CONFIG_FILE
+      value: "/app/configs/config_prod.yaml"
+    - name: PUSH_FIREBASE_SERVICE_ACCOUNT_PATH
+      value: "/app/firebase/service-account.json"
+    - name: TZ
+      value: "Asia/Jakarta"
+    - name: RUN_MIGRATIONS
+      value: "false"
+    - name: RUN_SEED
+      value: "false"
+  resources:
+    limits:
+      cpu: "700m"
+      memory: "256Mi"
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+
+worker:
+  args:
+    - --config
+    - /app/configs/config_prod.yaml
+  env:
+    - name: APP_ENV
+      value: "prod"
+    - name: APP_CONFIG_FILE
+      value: "/app/configs/config_prod.yaml"
+    - name: PUSH_FIREBASE_SERVICE_ACCOUNT_PATH
+      value: "/app/firebase/service-account.json"
+    - name: TZ
+      value: "Asia/Jakarta"
+    - name: RUN_MIGRATIONS
+      value: "false"
+    - name: RUN_SEED
+      value: "false"
+  resources:
+    limits:
+      cpu: "700m"
+      memory: "256Mi"
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+
+serviceAccount:
+  create: true

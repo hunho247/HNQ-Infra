@@ -1,0 +1,119 @@
+{{- $env := .Values.global.env | default "dev" -}}
+{{- $configKey := .Values.app.configKey | default "config.yaml" -}}
+{{- $configEnabled := or .Values.app.config .Values.app.configFile -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "push-notify.appFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: push-notify
+    app.kubernetes.io/name: {{ include "push-notify.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.app.replicas }}
+  selector:
+    matchLabels:
+      app: push-notify
+  template:
+    metadata:
+      labels:
+        app: push-notify
+        app.kubernetes.io/name: {{ include "push-notify.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      {{- if $configEnabled }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      {{- end }}
+    spec:
+      {{- if .Values.serviceAccount }}
+      serviceAccountName: {{ .Values.serviceAccount.name | default "default" }}
+      {{- end }}
+      {{- $pullSecrets := default .Values.serviceAccount.imagePullSecrets .Values.app.imagePullSecrets }}
+      {{- with $pullSecrets }}
+      imagePullSecrets:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if $configEnabled }}
+      initContainers:
+        - name: app-config
+          image: {{ .Values.app.configInitImage | default "mikefarah/yq:4.44.1" | quote }}
+          command:
+            - sh
+            - -c
+          args:
+            - |
+              set -euo pipefail
+              yq eval '.database.user = env(DB_USER) | .database.pass = env(DB_PASS)' /config/{{ $configKey }} > /work/{{ $configKey }}
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "app.secretName is required when app.config/configFile is set" .Values.app.secretName }}
+                  key: {{ .Values.app.secretKeys.dbUser | default "DB_USER" }}
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "app.secretName is required when app.config/configFile is set" .Values.app.secretName }}
+                  key: {{ .Values.app.secretKeys.dbPass | default "DB_PASS" }}
+          volumeMounts:
+            - name: app-config-base
+              mountPath: /config
+              readOnly: true
+            - name: app-config
+              mountPath: /work
+      {{- end }}
+      containers:
+        - name: push-notify
+          image: {{ .Values.app.image }}
+          imagePullPolicy: {{ .Values.app.imagePullPolicy | default "IfNotPresent" }}
+          {{- if .Values.app.env }}
+          env:
+            {{- range .Values.app.env }}
+            - name: {{ .name | quote }}
+              {{- if hasKey . "valueFrom" }}
+              valueFrom:
+{{- toYaml .valueFrom | nindent 16 }}
+              {{- else }}
+              value: {{ .value | quote }}
+              {{- end }}
+            {{- end }}
+          {{- else }}
+          env:
+            - name: APP_ENV
+              value: {{ $env | quote }}
+          {{- end }}
+          {{- if $configEnabled }}
+          volumeMounts:
+            - name: app-config
+              mountPath: /app/app
+              readOnly: true
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.app.containerPort }}
+          resources:
+{{- toYaml .Values.app.resources | nindent 12 }}
+      {{- if $configEnabled }}
+      volumes:
+        - name: app-config-base
+          configMap:
+            name: {{ include "push-notify.appFullname" . }}-config
+            items:
+              - key: {{ $configKey }}
+                path: {{ $configKey }}
+        - name: app-config
+          emptyDir: {}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+{{- toYaml . | nindent 8 }}
+      {{- end }}

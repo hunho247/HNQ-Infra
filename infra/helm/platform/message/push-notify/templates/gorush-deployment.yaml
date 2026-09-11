@@ -1,0 +1,72 @@
+{{- if .Values.gorush.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "push-notify.gorushFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: gorush
+    app.kubernetes.io/name: gorush
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.gorush.replicas }}
+  selector:
+    matchLabels:
+      app: gorush
+  template:
+    metadata:
+      labels:
+        app: gorush
+        app.kubernetes.io/name: gorush
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/gorush-configmap.yaml") . | sha256sum }}
+    spec:
+      containers:
+        - name: gorush
+          image: {{ printf "%s:%s" .Values.gorush.image .Values.gorush.tag | quote }}
+          imagePullPolicy: {{ .Values.gorush.imagePullPolicy | default "IfNotPresent" }}
+          args:
+            - "-c"
+            - "/home/gorush/{{ .Values.gorush.configKey | default "config.yml" }}"
+          ports:
+            - name: http
+              containerPort: {{ .Values.gorush.containerPort }}
+          volumeMounts:
+            - name: gorush-config
+              mountPath: /home/gorush/{{ .Values.gorush.configKey | default "config.yml" }}
+              subPath: {{ .Values.gorush.configKey | default "config.yml" }}
+              readOnly: true
+            - name: gorush-secrets
+              mountPath: /home/gorush/google-services_giaan.json
+              subPath: google-services_giaan.json
+              readOnly: true
+            - name: gorush-secrets
+              mountPath: /home/gorush/AuthKey_69S24H3ZF3.p8
+              subPath: AuthKey_69S24H3ZF3.p8
+              readOnly: true
+          resources:
+{{- toYaml .Values.gorush.resources | nindent 12 }}
+      volumes:
+        - name: gorush-config
+          configMap:
+            name: {{ .Values.gorush.configMapName | default (include "push-notify.gorushFullname" .) }}
+            items:
+              - key: {{ .Values.gorush.configKey | default "config.yml" }}
+                path: {{ .Values.gorush.configKey | default "config.yml" }}
+        - name: gorush-secrets
+          secret:
+            secretName: {{ .Values.gorush.secretName }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,213 @@
+global:
+  namespace: admin-workspace-dev
+  env: dev
+  host: admin-workspace.l2cteam.work
+
+fullnameOverride: outline
+
+image:
+  repository: docker.io/outlinewiki/outline
+  tag: "1.1.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+  annotations: {}
+
+persistence:
+  enabled: true
+  hostPath: /data/k3s/dev/admin/outline/data
+  mountPath: /var/lib/outline/data
+  size: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  storageClass: ""
+  existingClaim: ""
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+podAnnotations: {}
+podSecurityContext: {}
+securityContext: {}
+
+env:
+  - name: PORT
+    value: "3000"
+  - name: URL
+    value: "https://admin-workspace.l2cteam.work"
+  - name: FORCE_HTTPS
+    value: "false"
+  - name: FILE_STORAGE
+    value: "s3"
+  - name: FILE_STORAGE_LOCAL_ROOT_DIR
+    value: "/var/lib/outline/data"
+  - name: FILE_STORAGE_LOCAL_UPLOAD_DIR
+    value: "/var/lib/outline/data/uploads"
+  - name: AWS_ACCESS_KEY_ID
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: s3AccessKeyId
+  - name: AWS_SECRET_ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: s3SecretAccessKey
+  - name: AWS_REGION
+    value: "us-east-1"
+  - name: AWS_S3_UPLOAD_BUCKET_NAME
+    value: "admin-workspace-outline-s3"
+  - name: AWS_S3_UPLOAD_BUCKET_URL
+    value: "https://storage-minio-api-dev.l2cteam.work"
+  - name: AWS_S3_FORCE_PATH_STYLE
+    value: "true"
+  - name: AWS_S3_ACL
+    value: "private"
+  - name: SERVICES
+    value: "collaboration,websockets,web,worker"
+  - name: WEB_CONCURRENCY
+    value: "1"
+  - name: SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: SECRET_KEY
+  - name: UTILS_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: UTILS_SECRET
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: DATABASE_URL
+  - name: PGSSLMODE
+    value: "disable"
+  - name: REDIS_URL
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: REDIS_URL
+  - name: REDIS_COLLABORATION_URL
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: REDIS_COLLABORATION_URL
+  - name: SMTP_HOST
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: SMTP_HOST
+        optional: true
+  - name: SMTP_PORT
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: SMTP_PORT
+        optional: true
+  - name: SMTP_USERNAME
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: SMTP_USERNAME
+        optional: true
+  - name: SMTP_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: SMTP_PASSWORD
+        optional: true
+  - name: SMTP_FROM_EMAIL
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: SMTP_FROM_EMAIL
+        optional: true
+  - name: SMTP_REPLY_EMAIL
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: SMTP_REPLY_EMAIL
+        optional: true
+  - name: SMTP_SECURE
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: SMTP_SECURE
+        optional: true
+  - name: DISCORD_CLIENT_ID
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: DISCORD_CLIENT_ID
+        optional: true
+  - name: DISCORD_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: DISCORD_CLIENT_SECRET
+        optional: true
+  - name: DISCORD_SERVER_ID
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: DISCORD_SERVER_ID
+        optional: true
+  - name: DISCORD_SERVER_ROLES
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: DISCORD_SERVER_ROLES
+        optional: true
+
+probes:
+  startup:
+    enabled: true
+    path: /_health
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  liveness:
+    enabled: true
+    path: /_health
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+    successThreshold: 1
+  readiness:
+    enabled: true
+    path: /_health
+    initialDelaySeconds: 10
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 3
+    successThreshold: 1
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    cert-manager.io/cluster-issuer: letsencrypt-dns01-dev
+  path: /
+  tls:
+    enabled: true
+    secretName: admin-workspace-dev-tls
+
+nodeSelector:
+  kubernetes.io/hostname: server02
+tolerations: []
+affinity: {}

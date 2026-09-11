@@ -1,0 +1,60 @@
+global:
+  env: dev
+  namespace: giaan-clinic-dev
+  appName: giaan-clinic
+  host: client-giaan-clinic-dev.l2cteam.work
+backend:
+  fullnameOverride: backend-service
+  image: registry.gitlab.com/hnq-tech/clients/lotus-clinic/lotus-backend:6aebe241
+  imagePullPolicy: IfNotPresent
+  replicas: 1
+  containerPort: 1001
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+  env:
+    - name: APP_ENV
+      value: "dev"
+  secretName: giaan-clinic-backend-secrets
+  keystoreSecretName: giaan-clinic-keystore
+  firebaseSecretName: phu-san-gia-an
+  firebaseSecretKey: firebase-credentials.json
+  configFile: giaan-clinic/config/config_dev.yaml
+  readinessProbe:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 3
+    periodSeconds: 10
+  livenessProbe:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 10
+service:
+  port: 80
+ingress:
+  enabled: true
+  className: "traefik"
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    cert-manager.io/cluster-issuer: letsencrypt-dns01-dev
+  path: /
+  tls:
+    enabled: true
+    secretName: client-giaan-clinic-dev-tls
+serviceAccount:
+  create: false
+  name: default
+  imagePullSecrets:
+    - name: lotus-clinic-registry
+nodeSelector:
+  kubernetes.io/hostname: server02
+tolerations: []
+affinity: {}
+serviceMonitor:
+  enabled: true
+  interval: 15s

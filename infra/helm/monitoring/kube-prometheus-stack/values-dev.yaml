@@ -1,0 +1,58 @@
+kube-prometheus-stack:
+  prometheus:
+    prometheusSpec:
+      nodeSelector:
+        kubernetes.io/hostname: server02
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 10Gi
+
+  grafana:
+    admin:
+      existingSecret: grafana-admin-secret
+      userKey: admin-user
+      passwordKey: admin-password
+    persistence:
+      enabled: true
+      size: 1Gi
+      accessModes:
+        - ReadWriteOnce
+    nodeSelector:
+      kubernetes.io/hostname: server02
+    ingress:
+      enabled: true
+      ingressClassName: traefik-worker
+      annotations:
+        traefik.ingress.kubernetes.io/router.entrypoints: web
+      hosts:
+        - admin-grafana.l2cteam.work
+      tls: []
+
+  kube-state-metrics:
+    nodeSelector:
+      kubernetes.io/hostname: server02
+
+  prometheus-node-exporter:
+    # DaemonSet runs on every eligible node; exclude server01 (being decommissioned)
+    # while still monitoring the control-plane node and server02.
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: eks.amazonaws.com/compute-type
+                  operator: NotIn
+                  values:
+                    - fargate
+                - key: type
+                  operator: NotIn
+                  values:
+                    - virtual-kubelet
+                - key: kubernetes.io/hostname
+                  operator: NotIn
+                  values:
+                    - server01

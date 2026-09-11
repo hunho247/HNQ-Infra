@@ -1,0 +1,41 @@
+global:
+  namespace: server-control-prod
+  env: prod
+
+image:
+  repository: registry.gitlab.com/hnq-tech/hnq-platform/server-control
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: false  # Expose via Cloudflare Tunnel instead
+
+existingSecret: server-control-prod-credentials
+
+envFromSecret:
+  enabled: true
+  secretName: server-control-prod-credentials
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+nodeSelector:
+  kubernetes.io/hostname: server02
+
+# Required for Wake-on-LAN UDP broadcast on prod LAN
+hostNetwork:
+  enabled: true
+
+sshKeys:
+  enabled: true
+  secretName: server-control-prod-ssh-keys
+  mountPath: /ssh-keys
+
+cloudflareTunnel:
+  enabled: false
+  tokenSecretName: server-control-cloudflare-tunnel

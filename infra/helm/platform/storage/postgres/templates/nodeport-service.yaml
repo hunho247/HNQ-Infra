@@ -1,0 +1,24 @@
+{{- if .Values.nodePort.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.nodePort.name | default (printf "%s-nodeport" (include "postgres.fullname" .)) }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+  {{- with .Values.nodePort.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: NodePort
+  selector:
+    {{- include "postgres.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: postgres
+      port: {{ .Values.nodePort.port | default .Values.service.port }}
+      targetPort: postgres
+      {{- if .Values.nodePort.nodePort }}
+      nodePort: {{ .Values.nodePort.nodePort }}
+      {{- end }}
+{{- end }}

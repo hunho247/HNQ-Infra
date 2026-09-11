@@ -1,0 +1,20 @@
+{{- if or .Values.backend.config .Values.backend.configFile }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "obgyn-clinic-service.backendFullname" $ }}-config
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: backend-service
+    app.kubernetes.io/name: backend-service
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+data:
+  APP_CONFIG_YAML: |
+{{- if .Values.backend.configFile }}
+{{- $configFile := .Values.backend.configFile -}}
+{{- $configContent := required (printf "backend config file not found: %s" $configFile) (.Files.Get $configFile) -}}
+{{- $configContent | nindent 4 }}
+{{- else }}
+{{- toYaml .Values.backend.config | nindent 4 }}
+{{- end }}
+{{- end }}

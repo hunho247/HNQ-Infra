@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "obgyn-clinic-service.backendFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: backend-service
+spec:
+  type: ClusterIP
+  selector:
+    app: backend-service
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: {{ .Values.backend.containerPort }}

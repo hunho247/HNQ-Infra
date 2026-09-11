@@ -1,0 +1,25 @@
+flowchart LR
+    Dev[Developer
+    Commit code] --> CI[CI Pipeline
+    build & test]
+    CI --> IMG[Container Registry
+    Docker Image]
+    CI -->|Cập nhật manifests
+    Helm chart| GIT[(Git Repo
+    k8s manifests)]
+
+    GIT -->|Poll/Webhook| ARGO[Argo CD
+    Controller]
+    ARGO -->|So sánh
+    Desired vs Live| DIFF{Có khác biệt?}
+
+    DIFF -->|Không| NOOP[Giữ nguyên
+    Không làm gì]
+    DIFF -->|Có| SYNC[Sync
+    kubectl apply]
+
+    SYNC --> K8S[(Kubernetes Cluster)]
+    K8S --> STATUS[Trạng thái
+    Pods/Services/...]
+    STATUS --> UI[Argo CD UI
+    Web Dashboard]

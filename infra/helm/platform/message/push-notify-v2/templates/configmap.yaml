@@ -1,0 +1,21 @@
+{{- if or .Values.app.config .Values.app.configFile }}
+{{- $configKey := .Values.app.configKey | default "config.yaml" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "push-notify-v2.appFullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: push-notify-v2
+    app.kubernetes.io/name: {{ include "push-notify-v2.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  {{ $configKey }}: |
+{{- if .Values.app.configFile }}
+{{- $configFile := .Values.app.configFile -}}
+{{- $configContent := required (printf "app config file not found: %s" $configFile) (.Files.Get $configFile) -}}
+{{- $configContent | nindent 4 }}
+{{- else }}
+{{- toYaml .Values.app.config | nindent 4 }}
+{{- end }}
+{{- end }}

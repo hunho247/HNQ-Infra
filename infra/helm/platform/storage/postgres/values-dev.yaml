@@ -1,0 +1,14 @@
+global:
+  namespace: storage-postgres-dev
+  env: dev
+
+persistence:
+  hostPath: /data/k3s/dev/platform/storage/postgres
+  size: 10Gi
+
+nodePort:
+  enabled: true
+  nodePort: 32017
+
+nodeSelector:
+  kubernetes.io/hostname: server02

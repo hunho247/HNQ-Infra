@@ -1,0 +1,58 @@
+global:
+  namespace: storage-mariadb
+  env: dev
+
+fullnameOverride: mariadb
+
+existingSecret: mariadb-credentials
+
+auth:
+  database: app
+  username: app
+  rootPassword: ""
+  password: ""
+
+image:
+  repository: docker.io/library/mariadb
+  tag: "11.8.5"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 3306
+  annotations: {}
+
+nodePort:
+  enabled: true
+  name: mariadb-nodeport
+  port: 3306
+  nodePort: 32006
+  annotations: {}
+
+persistence:
+  enabled: true
+  hostPath: ""
+  size: 5Gi
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi
+
+podAnnotations: {}
+podSecurityContext: {}
+securityContext: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+extraEnv: []

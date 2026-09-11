@@ -1,0 +1,38 @@
+{{- if .Values.ingress.enabled }}
+{{- $root := . }}
+{{- $hosts := $root.Values.ingress.hosts | default (list $root.Values.global.host) }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "obgyn-clinic-service.backendFullname" $root }}
+  namespace: {{ $root.Release.Namespace }}
+  annotations:
+    {{- range $k, $v := $root.Values.ingress.annotations }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+spec:
+  {{- if $root.Values.ingress.className }}
+  ingressClassName: {{ $root.Values.ingress.className }}
+  {{- end }}
+  {{- if and $root.Values.ingress.tls.enabled $root.Values.ingress.tls.secretName }}
+  tls:
+    - hosts:
+        {{- range $host := $hosts }}
+        - {{ $host | quote }}
+        {{- end }}
+      secretName: {{ $root.Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    {{- range $host := $hosts }}
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: {{ $root.Values.ingress.path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "obgyn-clinic-service.backendFullname" $root }}
+                port:
+                  number: {{ $root.Values.service.port }}
+    {{- end }}
+{{- end }}

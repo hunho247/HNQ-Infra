@@ -1,0 +1,45 @@
+global:
+  namespace: server-control-dev
+  env: dev
+
+image:
+  repository: registry.gitlab.com/hnq-tech/hnq-platform/server-control
+  tag: "1.1.0"
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+  hosts:
+    - host: admin-server-control.l2cteam.work
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    enabled: false
+
+existingSecret: server-control-dev-credentials
+
+envFromSecret:
+  enabled: true
+  secretName: server-control-dev-credentials
+
+nodeSelector:
+  kubernetes.io/hostname: server02
+
+# Enable hostNetwork for Wake-on-LAN support on the dev node
+hostNetwork:
+  enabled: true
+
+sshKeys:
+  enabled: false
+  secretName: server-control-dev-ssh-keys
+  mountPath: /ssh-keys
+
+serviceAccount:
+  create: false
+  name: default
+  imagePullSecrets:
+    - name: gitlab-registry

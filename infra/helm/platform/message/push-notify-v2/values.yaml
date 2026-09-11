@@ -1,0 +1,127 @@
+global:
+  env: dev
+  namespace: push-notify-v2
+  host: ""
+
+app:
+  configFile: files/app/config_dev.yaml
+  configKey: config_dev.yaml
+  secretName: push-notify-v2-config
+  secretKeys:
+    dbHost: DB_HOST
+    dbPort: DB_PORT
+    dbName: DB_NAME
+    dbUser: DB_USER
+    dbPass: DB_PASS
+    internalApiKey: INTERNAL_API_KEY
+  configInitImage: mikefarah/yq:4.44.1
+
+api:
+  enabled: true
+  fullnameOverride: push-notify-v2
+  image: registry.gitlab.com/hnq-tech/hnq-platform/push-notify:dev
+  imagePullPolicy: IfNotPresent
+  replicas: 1
+  containerPort: 10080
+  command:
+    - /app/api
+  args:
+    - --config
+    - /app/configs/config_dev.yaml
+  env:
+    - name: APP_ENV
+      value: "dev"
+    - name: APP_CONFIG_FILE
+      value: "/app/configs/config_dev.yaml"
+    - name: PUSH_FIREBASE_SERVICE_ACCOUNT_PATH
+      value: "/app/firebase/service-account.json"
+    - name: TZ
+      value: "Asia/Jakarta"
+    - name: RUN_MIGRATIONS
+      value: "false"
+    - name: RUN_SEED
+      value: "false"
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "150m"
+      memory: "256Mi"
+  readinessProbe:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 10
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 3
+    successThreshold: 1
+  livenessProbe:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 20
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+    successThreshold: 1
+
+worker:
+  enabled: true
+  fullnameOverride: push-notify-v2-worker
+  image: ""
+  imagePullPolicy: IfNotPresent
+  replicas: 0
+  command:
+    - /app/worker
+  args:
+    - --config
+    - /app/configs/config_dev.yaml
+  env:
+    - name: APP_ENV
+      value: "dev"
+    - name: APP_CONFIG_FILE
+      value: "/app/configs/config_dev.yaml"
+    - name: PUSH_FIREBASE_SERVICE_ACCOUNT_PATH
+      value: "/app/firebase/service-account.json"
+    - name: TZ
+      value: "Asia/Jakarta"
+    - name: RUN_MIGRATIONS
+      value: "false"
+    - name: RUN_SEED
+      value: "false"
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "150m"
+      memory: "256Mi"
+
+firebase:
+  secretName: push-notify-v2-firebase
+  secretKey: service-account.json
+  mountPath: /app/firebase/service-account.json
+
+serviceAccount:
+  create: false
+  name: default
+  imagePullSecrets:
+    - name: gitlab-registry
+
+service:
+  type: ClusterIP
+  port: 10080
+  targetPort: 10080
+
+ingress:
+  enabled: false
+  className: traefik
+  annotations: {}
+  path: /
+  tls:
+    enabled: false
+    secretName: ""
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,13 @@
+# Values are passed to the upstream chart via the alias `gitlabRunner`.
+#
+# Example (do not commit secrets):
+# gitlabRunner:
+#   gitlabUrl: "https://gitlab.com/"
+#   runnerRegistrationToken: "${RUNNER_REGISTRATION_TOKEN}"
+#   rbac:
+#     create: true
+#   runners:
+#     config: |
+#       [[runners]]
+#         [runners.kubernetes]
+#           namespace = "gitlab-runner"

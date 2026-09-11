@@ -1,0 +1,53 @@
+# CoreDNS HA — HPA + PodDisruptionBudget
+#
+# DEPLOYMENT NOTE: This file must be placed at:
+#   /var/lib/rancher/k3s/server/manifests/coredns-ha.yaml
+# on the k3s control-plane host. k3s applies it automatically and does NOT
+# overwrite custom files in that directory (only its own built-in addons).
+#
+# DO NOT manage this via an ArgoCD Application — CoreDNS must be resilient
+# before ArgoCD can start (circular dependency: ArgoCD needs DNS to reach
+# GitLab/git repos, DNS HA must not depend on ArgoCD being alive).
+#
+# Why HPA instead of editing coredns.yaml directly:
+#   k3s rewrites /var/lib/rancher/k3s/server/manifests/coredns.yaml from its
+#   embedded template on every restart/upgrade, resetting replicas to 1.
+#   HPA is a separate object k3s never touches — it overrides spec.replicas
+#   back to minReplicas=2 within seconds of any reset.
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: coredns
+  namespace: kube-system
+  labels:
+    k8s-app: kube-dns
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: coredns
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+# Ensures at least 1 DNS pod survives voluntary disruptions
+# (node drain, rolling upgrade, etc.)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: coredns
+  namespace: kube-system
+  labels:
+    k8s-app: kube-dns
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      k8s-app: kube-dns

@@ -1,0 +1,78 @@
+global:
+  namespace: storage-minio
+  env: dev
+
+fullnameOverride: minio
+
+existingSecret: minio-credentials
+
+image:
+  repository: docker.io/minio/minio
+  tag: RELEASE.2025-04-22T22-12-26Z
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Single replica on a hostPath volume: the old pod must release /data before
+# the new one mounts it. RollingUpdate would surge a second pod onto the same
+# directory.
+strategy:
+  type: Recreate
+
+service:
+  type: ClusterIP
+  annotations: {}
+  port: 9000
+  consolePort: 9001
+
+nodePort:
+  enabled: false
+  name: minio-nodeport
+  apiPort: 9000
+  consolePort: 9001
+  apiNodePort: 32090
+  consoleNodePort: 32091
+  annotations: {}
+
+persistence:
+  enabled: true
+  hostPath: ""
+  size: 20Gi
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 300m
+    memory: 512Mi
+
+podAnnotations: {}
+
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  runAsNonRoot: true
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+  hosts:
+    api:
+      host: storage-minio-api.local
+      path: /
+    console:
+      host: storage-minio-console.local
+      path: /
+  tls: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+extraEnv: []

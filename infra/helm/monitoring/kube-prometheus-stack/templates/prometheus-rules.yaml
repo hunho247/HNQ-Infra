@@ -1,0 +1,69 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: hnq-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: kube-prometheus-stack
+    release: {{ .Release.Name }}
+spec:
+  groups:
+    - name: pod.rules
+      interval: 1m
+      rules:
+        - alert: PodCrashLooping
+          expr: max_over_time(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}[5m]) >= 1
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: Pod {{`{{ $labels.namespace }}`}}/{{`{{ $labels.pod }}`}} crash looping
+            description: Container {{`{{ $labels.container }}`}} is in CrashLoopBackOff.
+
+        - alert: OOMKilled
+          expr: kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "OOMKilled: {{`{{ $labels.namespace }}`}}/{{`{{ $labels.pod }}`}}"
+            description: Container {{`{{ $labels.container }}`}} was OOMKilled.
+
+        - alert: PodRestartTooMany
+          expr: increase(kube_pod_container_status_restarts_total[1h]) > 5
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: Pod {{`{{ $labels.namespace }}`}}/{{`{{ $labels.pod }}`}} restarting too often
+            description: Container {{`{{ $labels.container }}`}} restarted {{`{{ $value | printf "%.0f" }}`}} times in 1h.
+
+    - name: node.rules
+      interval: 1m
+      rules:
+        - alert: NodeNotReady
+          expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Node {{`{{ $labels.node }}`}} not ready
+            description: Node {{`{{ $labels.node }}`}} has been not ready for 5+ minutes.
+
+        - alert: NodeHighMemory
+          expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 80
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High memory: {{`{{ $labels.instance }}`}}"
+            description: Memory usage {{`{{ $value | printf "%.1f" }}`}}% on {{`{{ $labels.instance }}`}}.
+
+        - alert: NodeHighCPU
+          expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High CPU: {{`{{ $labels.instance }}`}}"
+            description: CPU usage {{`{{ $value | printf "%.1f" }}`}}% on {{`{{ $labels.instance }}`}}.

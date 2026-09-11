@@ -1,0 +1,95 @@
+env: "prod"
+debug: false
+server:
+  address: ":1001"
+context:
+  timeout: "5s"
+database:
+  host: "mariadb.storage-mariadb-prod"
+  port: "3306"
+  name: "db_biboo_clinic_prod"
+  logLevel: "error"
+  connectionTimeout: "5s"
+pushNotify:
+  host: "push-notify.push-notify-prod.svc.cluster.local"
+  port: ":10080"
+  reminderLeadTime: "2h"
+  interval: "1h"
+startupBillBackfill:
+  from: "260101"
+  to: "260623"
+  limit: 0
+search:
+  host: "opensearch.storage-opensearch-prod"
+  port: ":9200"
+  index:
+    users:
+      name: "biboo-prod-users"
+      minScore: 40
+minio:
+  endpoint: "storage-minio-api.l2cteam.work"
+  bucket: "bucket-biboo-clinic-prod"
+  expire: "1h"
+  useSSL: true
+token:
+  expireAccessToken: "168h"
+  expireRefreshToken: "720h"
+  privateKeyPath: "./app/keystore/private.pem"
+  publicKeyPath: "./app/keystore/public.pem"
+app:
+  slowTime: 1
+  captcha:
+    enable: false
+  oauth2:
+    firebase:
+      credentialFilePath: "/app/app/firebase-credentials.json"
+      projectId: "hnq-obgyn-clinic-service"
+    google:
+      redirectURL: "https://backend/user/login/callback/google"
+      scopes:
+        - "profile"
+        - "email"
+    facebook:
+      redirectURL: "http://localhost:1001/user/login/callback/facebook"
+      scopes:
+        - "public_profile"
+        - "email"
+  basePath: "prod"
+  assetPath: "public/asset"
+  rateLimit:
+    default:
+      enable: true
+      period: "minute"
+      limit: 50
+    intensive:
+      enable: true
+      period: "minute"
+      limit: 5
+  checkDeviceDoctor: false
+logging:
+  config:
+    level: info
+    disableCaller: false
+    encoding: "json"
+    outputPaths:
+      - "stdout"
+    errorOutputPaths:
+      - "stderr"
+    encoderConfig:
+      timeKey: "ts"
+      levelKey: "level"
+      nameKey: "logger"
+      callerKey: "caller"
+      functionKey: ""
+      messageKey: "msg"
+      stacktraceKey: "stacktrace"
+      lineEnding: "\n"
+      levelEncoder: "capital"
+      timeEncoder: "ISO8601"
+      durationEncoder: "s"
+      callerEncoder: "short"
+  logPath: "/var/log/biboo/biboo_service.log"
+  rotate:
+    maxSize: 1
+    maxBackups: 2
+    maxAge: 30

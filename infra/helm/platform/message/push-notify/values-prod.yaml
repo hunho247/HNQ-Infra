@@ -1,0 +1,35 @@
+global:
+  env: prod
+  namespace: push-notify-prod
+
+app:
+  env:
+    - name: APP_ENV
+      value: "prod"
+    - name: APP_CONFIG_FILE
+      value: "/app/app/config_prod.yaml"
+    - name: TZ
+      value: "Asia/Jakarta"
+  configFile: files/app/config_prod.yaml
+  configKey: config_prod.yaml
+  resources:
+    limits:
+      cpu: "700m"
+      memory: "256Mi"
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+
+gorush:
+  service:
+    nodePort: 30088
+  resources:
+    limits:
+      cpu: "700m"
+      memory: "256Mi"
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+
+serviceAccount:
+  create: true

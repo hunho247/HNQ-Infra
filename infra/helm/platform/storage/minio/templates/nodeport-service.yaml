@@ -1,0 +1,30 @@
+{{- if .Values.nodePort.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.nodePort.name | default (printf "%s-nodeport" (include "minio.fullname" .)) }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "minio.labels" . | nindent 4 }}
+  {{- with .Values.nodePort.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: NodePort
+  selector:
+    {{- include "minio.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: api
+      port: {{ .Values.nodePort.apiPort | default .Values.service.port }}
+      targetPort: api
+      {{- if .Values.nodePort.apiNodePort }}
+      nodePort: {{ .Values.nodePort.apiNodePort }}
+      {{- end }}
+    - name: console
+      port: {{ .Values.nodePort.consolePort | default .Values.service.consolePort }}
+      targetPort: console
+      {{- if .Values.nodePort.consoleNodePort }}
+      nodePort: {{ .Values.nodePort.consoleNodePort }}
+      {{- end }}
+{{- end }}

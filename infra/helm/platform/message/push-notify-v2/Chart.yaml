@@ -1,0 +1,6 @@
+apiVersion: v2
+name: push-notify-v2
+description: Push notify v2 service (api + worker)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

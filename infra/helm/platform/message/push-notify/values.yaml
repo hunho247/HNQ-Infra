@@ -1,0 +1,79 @@
+global:
+  env: dev
+  namespace: push-notify
+  host: ""
+
+app:
+  fullnameOverride: push-notify
+  image: registry.gitlab.com/lifetocode/thanhvien-shop/push-service:c25d14c3
+  imagePullPolicy: IfNotPresent
+  replicas: 0
+  containerPort: 10080
+  env:
+    - name: APP_ENV
+      value: "dev"
+    - name: APP_CONFIG_FILE
+      value: "/app/app/config_dev.yaml"
+    - name: TZ
+      value: "Asia/Jakarta"
+  configFile: files/app/config_dev.yaml
+  configKey: config_dev.yaml
+  secretName: push-notify-config
+  secretKeys:
+    dbUser: DB_USER
+    dbPass: DB_PASS
+  configInitImage: mikefarah/yq:4.44.1
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "150m"
+      memory: "256Mi"
+
+gorush:
+  enabled: true
+  fullnameOverride: gorush
+  image: appleboy/gorush
+  tag: latest
+  imagePullPolicy: IfNotPresent
+  replicas: 0
+  containerPort: 10088
+  service:
+    type: NodePort
+    port: 10088
+    nodePort: 30089
+  secretName: push-notify-gorush
+  configMapName: gorush-config
+  configKey: config.yml
+  configFile: files/gorush/config.yml
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "150m"
+      memory: "256Mi"
+
+serviceAccount:
+  create: false
+  name: default
+  imagePullSecrets:
+    - name: gitlab-registry
+
+service:
+  type: ClusterIP
+  port: 10080
+
+ingress:
+  enabled: false
+  className: traefik
+  annotations: {}
+  path: /
+  tls:
+    enabled: false
+    secretName: ""
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

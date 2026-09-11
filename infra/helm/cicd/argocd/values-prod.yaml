@@ -1,0 +1,78 @@
+argocd:
+  global:
+    # Argo CD is exposed via tunnel domain.
+    domain: admin-argocd.l2cteam.work
+    # Pin Argo CD control-plane workloads to server02.
+    nodeSelector:
+      kubernetes.io/os: linux
+      kubernetes.io/hostname: server02
+
+  configs:
+    cm:
+      # Public URL used by the UI/CLI
+      url: https://admin-argocd.l2cteam.work
+    params:
+      # ArgoCD serves HTTP behind tunnel edge TLS.
+      server.insecure: "true"
+    rbac:
+      policy.csv: |
+        g, argo-admins, role:admin
+      scopes: '[groups]'
+    repositories: {}
+    credentialTemplates: {}
+    secret:
+      # Optional: set a bcrypt hash to pin the admin password. Leave empty to use the auto-generated secret.
+      argocdServerAdminPassword: ""
+
+  server:
+    replicas: 1
+    service:
+      type: ClusterIP
+    ingress:
+      enabled: true
+      ingressClassName: traefik
+      annotations:
+        traefik.ingress.kubernetes.io/router.entrypoints: websecure
+        cert-manager.io/cluster-issuer: letsencrypt-dns01-prod
+      hosts:
+        - admin-argocd.l2cteam.work
+      paths:
+        - /
+      pathType: Prefix
+      tls:
+        - hosts:
+            - admin-argocd.l2cteam.work
+          secretName: admin-argocd-prod-tls
+      https: false
+    extraArgs:
+      - --insecure
+
+  controller:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1
+        memory: 1Gi
+
+  repoServer:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1
+        memory: 1Gi
+
+  applicationSet:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+  notifications:
+    enabled: false

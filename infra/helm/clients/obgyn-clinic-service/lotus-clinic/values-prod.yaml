@@ -1,0 +1,62 @@
+global:
+  env: prod
+  namespace: lotus-clinic-prod
+  appName: lotus-clinic
+  host: client-lotus-clinic.l2cteam.work
+backend:
+  fullnameOverride: backend-service
+  image: registry.gitlab.com/hnq-tech/clients/lotus-clinic/lotus-backend:f1eb557d
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets:
+    - name: lotus-clinic-registry
+  replicas: 1
+  containerPort: 1001
+  env:
+    - name: APP_ENV
+      value: "prod"
+  secretName: lotus-clinic-backend-secrets
+  keystoreSecretName: lotus-clinic-keystore
+  firebaseSecretName: hnq-obgyn-clinic-service
+  firebaseSecretKey: firebase-credentials.json
+  configFile: lotus-clinic/config/config_prod.yaml
+  readinessProbe:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 3
+    periodSeconds: 10
+  livenessProbe:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  resources:
+    limits:
+      cpu: "2000m"
+      memory: "1Gi"
+    requests:
+      cpu: "300m"
+      memory: "256Mi"
+service:
+  port: 80
+serviceAccount:
+  name: default
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    cert-manager.io/cluster-issuer: letsencrypt-dns01-prod
+  path: /
+  tls:
+    enabled: true
+    secretName: client-lotus-clinic-prod-tls
+nodeSelector:
+  kubernetes.io/hostname: hnq-server-vietnix-01-hjnu
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
+serviceMonitor:
+  enabled: true
+  interval: 15s

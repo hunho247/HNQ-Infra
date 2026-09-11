@@ -1,0 +1,86 @@
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: traefik-worker
+  namespace: kube-system
+spec:
+  chart: https://%{KUBERNETES_API}%/static/charts/traefik-37.1.1+up37.1.0.tgz
+  targetNamespace: kube-system
+  failurePolicy: reinstall
+  set:
+    global.systemDefaultRegistry: ""
+  valuesContent: |-
+    fullnameOverride: traefik-worker
+
+    image:
+      tag: "3.6.7"
+
+    podSecurityContext:
+      runAsUser: 0
+      runAsGroup: 0
+      runAsNonRoot: false
+
+    securityContext:
+      capabilities:
+        drop: [ALL]
+        add: [NET_BIND_SERVICE]
+      allowPrivilegeEscalation: false
+
+    deployment:
+      kind: DaemonSet
+      replicas: 1
+    updateStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        # Required by Traefik chart when hostNetwork=true.
+        maxUnavailable: 2
+        maxSurge: 0
+
+    # Bind directly on worker host network so existing worker cloudflared
+    # can use local origin without crossing control-plane.
+    hostNetwork: true
+    service:
+      enabled: false
+
+    ports:
+      traefik:
+        expose:
+          default: false
+      metrics:
+        port: 9200
+        expose:
+          default: false
+      web:
+        port: 80
+        expose:
+          default: true
+        exposedPort: 80
+        protocol: TCP
+      websecure:
+        port: 443
+        expose:
+          default: false
+
+    ingressClass:
+      enabled: true
+      isDefaultClass: false
+      name: traefik-worker
+
+    providers:
+      kubernetesIngress:
+        ingressClass: traefik-worker
+        publishedService:
+          enabled: false
+
+    gateway:
+      enabled: false
+    gatewayClass:
+      enabled: false
+
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist

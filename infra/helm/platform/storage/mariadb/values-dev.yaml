@@ -1,0 +1,16 @@
+global:
+  namespace: storage-mariadb-dev
+  env: dev
+
+auth:
+  database: foody_restaurant
+  username: foody
+
+nodePort:
+  nodePort: 32016
+
+persistence:
+  hostPath: /data/k3s/dev/platform/storage/mariadb
+
+nodeSelector:
+  kubernetes.io/hostname: server02

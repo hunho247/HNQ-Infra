@@ -1,0 +1,31 @@
+global:
+  namespace: storage-opensearch-prod
+  env: prod
+
+ingress:
+  enabled: true
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    cert-manager.io/cluster-issuer: letsencrypt-dns01-prod
+  host: storage-opensearch.l2cteam.work
+  tls:
+    enabled: true
+    secretName: storage-opensearch-prod-tls
+
+persistence:
+  hostPath: /home/hnq/hnq_data/prod/platform/storage/opensearch
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 1Gi
+  limits:
+    cpu: 2500m
+    memory: 2Gi
+
+nodeSelector:
+  kubernetes.io/hostname: hnq-server-vietnix-01-hjnu
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule

@@ -1,0 +1,42 @@
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    # Keep k3s bundled Traefik with:
+    # - web (80) for tunnel origin (localhost)
+    # - websecure (443) for HTTPS ingress
+    service:
+      enabled: true
+      type: LoadBalancer
+      # Keep external traffic on the same node that received it.
+      spec:
+        externalTrafficPolicy: Local
+        internalTrafficPolicy: Local
+    deployment:
+      # Keep a single ingress pod on control-plane to avoid cross-node hops for prod.
+      kind: Deployment
+      replicas: 1
+    nodeSelector:
+      kubernetes.io/hostname: hnq-server-vietnix-01-hjnu
+    ports:
+      web:
+        port: 80
+        expose:
+          default: true
+        exposedPort: 80
+        protocol: TCP
+      websecure:
+        port: 443
+        expose:
+          default: true
+        exposedPort: 443
+        protocol: TCP
+        tls:
+          enabled: true
+    providers:
+      kubernetesIngress:
+        publishedService:
+          enabled: true

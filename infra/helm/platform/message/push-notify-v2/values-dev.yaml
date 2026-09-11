@@ -1,0 +1,9 @@
+global:
+  env: dev
+  namespace: push-notify-v2-dev
+nodeSelector:
+  kubernetes.io/hostname: server02
+api:
+  image: registry.gitlab.com/hnq-tech/hnq-platform/push-notify:2f712b9c
+worker:
+  image: registry.gitlab.com/hnq-tech/hnq-platform/push-notify:2f712b9c

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: server-control
+description: Self-hosted server management dashboard — Wake-on-LAN, SSH shutdown/restart, and status monitoring
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

@@ -1,0 +1,19 @@
+{{- if .Values.api.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "push-notify-v2.appFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: push-notify-v2-api
+    app.kubernetes.io/name: {{ include "push-notify-v2.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: {{ .Values.service.type | default "ClusterIP" }}
+  selector:
+    app: push-notify-v2-api
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort | default .Values.api.containerPort }}
+{{- end }}

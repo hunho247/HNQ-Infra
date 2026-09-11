@@ -1,0 +1,11 @@
+apiVersion: v2
+name: hnq-gitlab-runner
+description: Wrapper chart for GitLab Runner (upstream dependency)
+type: application
+version: 0.1.0
+
+dependencies:
+  - name: gitlab-runner
+    alias: gitlabRunner
+    repository: https://charts.gitlab.io
+    version: "0.84.1"

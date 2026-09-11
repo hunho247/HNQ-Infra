@@ -1,0 +1,15 @@
+{{- if .Values.gorush.enabled }}
+{{- $configFile := .Values.gorush.configFile | default "files/gorush/config.yml" -}}
+{{- $configContent := required (printf "gorush config file not found: %s" $configFile) (.Files.Get $configFile) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.gorush.configMapName | default (include "push-notify.gorushFullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: gorush
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  {{ .Values.gorush.configKey | default "config.yml" }}: |
+{{- $configContent | nindent 4 }}
+{{- end }}

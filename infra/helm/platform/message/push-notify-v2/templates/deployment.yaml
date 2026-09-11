@@ -1,0 +1,383 @@
+{{- $env := .Values.global.env | default "dev" -}}
+{{- $configKey := .Values.app.configKey | default "config.yaml" -}}
+{{- $configEnabled := or .Values.app.config .Values.app.configFile -}}
+{{- if .Values.api.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "push-notify-v2.appFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: push-notify-v2-api
+    app.kubernetes.io/name: {{ include "push-notify-v2.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      app: push-notify-v2-api
+  template:
+    metadata:
+      labels:
+        app: push-notify-v2-api
+        app.kubernetes.io/name: {{ include "push-notify-v2.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: api
+      {{- if $configEnabled }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      {{- end }}
+    spec:
+      {{- if .Values.serviceAccount }}
+      serviceAccountName: {{ .Values.serviceAccount.name | default "default" }}
+      {{- end }}
+      {{- $sa := .Values.serviceAccount | default dict }}
+      {{- $pullSecrets := default $sa.imagePullSecrets .Values.api.imagePullSecrets }}
+      {{- with $pullSecrets }}
+      imagePullSecrets:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if $configEnabled }}
+      initContainers:
+        - name: app-config
+          image: {{ .Values.app.configInitImage | default "mikefarah/yq:4.44.1" | quote }}
+          command:
+            - sh
+            - -c
+          args:
+            - |
+              set -euo pipefail
+              cp /config/{{ $configKey }} /work/{{ $configKey }}
+              if [ -n "${DB_HOST:-}" ]; then yq eval -i '.database.host = strenv(DB_HOST)' /work/{{ $configKey }}; fi
+              if [ -n "${DB_PORT:-}" ]; then yq eval -i '.database.port = strenv(DB_PORT)' /work/{{ $configKey }}; fi
+              if [ -n "${DB_NAME:-}" ]; then yq eval -i '.database.name = strenv(DB_NAME)' /work/{{ $configKey }}; fi
+              if [ -n "${DB_USER:-}" ]; then yq eval -i '.database.user = strenv(DB_USER)' /work/{{ $configKey }}; fi
+              if [ -n "${DB_PASS:-}" ]; then yq eval -i '.database.pass = strenv(DB_PASS)' /work/{{ $configKey }}; fi
+              if [ -n "${INTERNAL_API_KEY:-}" ]; then yq eval -i '.internal_api_key = strenv(INTERNAL_API_KEY)' /work/{{ $configKey }}; fi
+          {{- if .Values.app.secretName }}
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.app.secretName }}
+                  key: {{ .Values.app.secretKeys.dbHost | default "DB_HOST" }}
+                  optional: true
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.app.secretName }}
+                  key: {{ .Values.app.secretKeys.dbPort | default "DB_PORT" }}
+                  optional: true
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.app.secretName }}
+                  key: {{ .Values.app.secretKeys.dbName | default "DB_NAME" }}
+                  optional: true
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.app.secretName }}
+                  key: {{ .Values.app.secretKeys.dbUser | default "DB_USER" }}
+                  optional: true
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.app.secretName }}
+                  key: {{ .Values.app.secretKeys.dbPass | default "DB_PASS" }}
+                  optional: true
+            - name: INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.app.secretName }}
+                  key: {{ .Values.app.secretKeys.internalApiKey | default "INTERNAL_API_KEY" }}
+                  optional: true
+          {{- end }}
+          volumeMounts:
+            - name: app-config-base
+              mountPath: /config
+              readOnly: true
+            - name: app-config
+              mountPath: /work
+      {{- end }}
+      containers:
+        - name: push-notify-v2-api
+          image: {{ .Values.api.image }}
+          imagePullPolicy: {{ .Values.api.imagePullPolicy | default "IfNotPresent" }}
+          {{- with .Values.api.command }}
+          command:
+{{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.api.args }}
+          args:
+{{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.api.env }}
+          env:
+            {{- range .Values.api.env }}
+            - name: {{ .name | quote }}
+              {{- if hasKey . "valueFrom" }}
+              valueFrom:
+{{- toYaml .valueFrom | nindent 16 }}
+              {{- else }}
+              value: {{ .value | quote }}
+              {{- end }}
+            {{- end }}
+          {{- else }}
+          env:
+            - name: APP_ENV
+              value: {{ $env | quote }}
+          {{- end }}
+          {{- if or $configEnabled .Values.firebase.secretName }}
+          volumeMounts:
+            {{- if $configEnabled }}
+            - name: app-config
+              mountPath: /app/configs
+              readOnly: true
+            {{- end }}
+            {{- if .Values.firebase.secretName }}
+            - name: firebase-credentials
+              mountPath: {{ .Values.firebase.mountPath | default "/app/configs/service-account.json" }}
+              subPath: {{ .Values.firebase.secretKey | default "service-account.json" }}
+              readOnly: true
+            {{- end }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.containerPort }}
+          {{- if and .Values.api.readinessProbe .Values.api.readinessProbe.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.api.readinessProbe.path | default "/healthz" }}
+              port: http
+            initialDelaySeconds: {{ .Values.api.readinessProbe.initialDelaySeconds | default 10 }}
+            periodSeconds: {{ .Values.api.readinessProbe.periodSeconds | default 15 }}
+            timeoutSeconds: {{ .Values.api.readinessProbe.timeoutSeconds | default 5 }}
+            failureThreshold: {{ .Values.api.readinessProbe.failureThreshold | default 3 }}
+            successThreshold: {{ .Values.api.readinessProbe.successThreshold | default 1 }}
+          {{- end }}
+          {{- if and .Values.api.livenessProbe .Values.api.livenessProbe.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.api.livenessProbe.path | default "/healthz" }}
+              port: http
+            initialDelaySeconds: {{ .Values.api.livenessProbe.initialDelaySeconds | default 20 }}
+            periodSeconds: {{ .Values.api.livenessProbe.periodSeconds | default 30 }}
+            timeoutSeconds: {{ .Values.api.livenessProbe.timeoutSeconds | default 5 }}
+            failureThreshold: {{ .Values.api.livenessProbe.failureThreshold | default 3 }}
+            successThreshold: {{ .Values.api.livenessProbe.successThreshold | default 1 }}
+          {{- end }}
+          resources:
+{{- toYaml .Values.api.resources | nindent 12 }}
+      {{- if or $configEnabled .Values.firebase.secretName }}
+      volumes:
+        {{- if $configEnabled }}
+        - name: app-config-base
+          configMap:
+            name: {{ include "push-notify-v2.appFullname" . }}-config
+            items:
+              - key: {{ $configKey }}
+                path: {{ $configKey }}
+        - name: app-config
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.firebase.secretName }}
+        - name: firebase-credentials
+          secret:
+            secretName: {{ .Values.firebase.secretName }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
+
+{{- if and .Values.api.enabled .Values.worker.enabled }}
+---
+{{- end }}
+
+{{- if .Values.worker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "push-notify-v2.workerFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: push-notify-v2-worker
+    app.kubernetes.io/name: {{ include "push-notify-v2.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      app: push-notify-v2-worker
+  template:
+    metadata:
+      labels:
+        app: push-notify-v2-worker
+        app.kubernetes.io/name: {{ include "push-notify-v2.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: worker
+      {{- if $configEnabled }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      {{- end }}
+    spec:
+      {{- if .Values.serviceAccount }}
+      serviceAccountName: {{ .Values.serviceAccount.name | default "default" }}
+      {{- end }}
+      {{- $sa := .Values.serviceAccount | default dict }}
+      {{- $pullSecrets := default $sa.imagePullSecrets .Values.worker.imagePullSecrets }}
+      {{- with $pullSecrets }}
+      imagePullSecrets:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if $configEnabled }}
+      initContainers:
+        - name: app-config
+          image: {{ .Values.app.configInitImage | default "mikefarah/yq:4.44.1" | quote }}
+          command:
+            - sh
+            - -c
+          args:
+            - |
+              set -euo pipefail
+              cp /config/{{ $configKey }} /work/{{ $configKey }}
+              if [ -n "${DB_HOST:-}" ]; then yq eval -i '.database.host = strenv(DB_HOST)' /work/{{ $configKey }}; fi
+              if [ -n "${DB_PORT:-}" ]; then yq eval -i '.database.port = strenv(DB_PORT)' /work/{{ $configKey }}; fi
+              if [ -n "${DB_NAME:-}" ]; then yq eval -i '.database.name = strenv(DB_NAME)' /work/{{ $configKey }}; fi
+              if [ -n "${DB_USER:-}" ]; then yq eval -i '.database.user = strenv(DB_USER)' /work/{{ $configKey }}; fi
+              if [ -n "${DB_PASS:-}" ]; then yq eval -i '.database.pass = strenv(DB_PASS)' /work/{{ $configKey }}; fi
+              if [ -n "${INTERNAL_API_KEY:-}" ]; then yq eval -i '.internal_api_key = strenv(INTERNAL_API_KEY)' /work/{{ $configKey }}; fi
+          {{- if .Values.app.secretName }}
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.app.secretName }}
+                  key: {{ .Values.app.secretKeys.dbHost | default "DB_HOST" }}
+                  optional: true
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.app.secretName }}
+                  key: {{ .Values.app.secretKeys.dbPort | default "DB_PORT" }}
+                  optional: true
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.app.secretName }}
+                  key: {{ .Values.app.secretKeys.dbName | default "DB_NAME" }}
+                  optional: true
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.app.secretName }}
+                  key: {{ .Values.app.secretKeys.dbUser | default "DB_USER" }}
+                  optional: true
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.app.secretName }}
+                  key: {{ .Values.app.secretKeys.dbPass | default "DB_PASS" }}
+                  optional: true
+            - name: INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.app.secretName }}
+                  key: {{ .Values.app.secretKeys.internalApiKey | default "INTERNAL_API_KEY" }}
+                  optional: true
+          {{- end }}
+          volumeMounts:
+            - name: app-config-base
+              mountPath: /config
+              readOnly: true
+            - name: app-config
+              mountPath: /work
+      {{- end }}
+      containers:
+        - name: push-notify-v2-worker
+          image: {{ .Values.worker.image | default .Values.api.image }}
+          imagePullPolicy: {{ .Values.worker.imagePullPolicy | default .Values.api.imagePullPolicy | default "IfNotPresent" }}
+          {{- with .Values.worker.command }}
+          command:
+{{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.worker.args }}
+          args:
+{{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.worker.env }}
+          env:
+            {{- range .Values.worker.env }}
+            - name: {{ .name | quote }}
+              {{- if hasKey . "valueFrom" }}
+              valueFrom:
+{{- toYaml .valueFrom | nindent 16 }}
+              {{- else }}
+              value: {{ .value | quote }}
+              {{- end }}
+            {{- end }}
+          {{- else }}
+          env:
+            - name: APP_ENV
+              value: {{ $env | quote }}
+          {{- end }}
+          {{- if or $configEnabled .Values.firebase.secretName }}
+          volumeMounts:
+            {{- if $configEnabled }}
+            - name: app-config
+              mountPath: /app/configs
+              readOnly: true
+            {{- end }}
+            {{- if .Values.firebase.secretName }}
+            - name: firebase-credentials
+              mountPath: {{ .Values.firebase.mountPath | default "/app/configs/service-account.json" }}
+              subPath: {{ .Values.firebase.secretKey | default "service-account.json" }}
+              readOnly: true
+            {{- end }}
+          {{- end }}
+          resources:
+{{- toYaml .Values.worker.resources | nindent 12 }}
+      {{- if or $configEnabled .Values.firebase.secretName }}
+      volumes:
+        {{- if $configEnabled }}
+        - name: app-config-base
+          configMap:
+            name: {{ include "push-notify-v2.appFullname" . }}-config
+            items:
+              - key: {{ $configKey }}
+                path: {{ $configKey }}
+        - name: app-config
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.firebase.secretName }}
+        - name: firebase-credentials
+          secret:
+            secretName: {{ .Values.firebase.secretName }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

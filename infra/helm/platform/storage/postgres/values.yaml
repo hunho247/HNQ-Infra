@@ -1,0 +1,57 @@
+global:
+  namespace: storage-postgres
+  env: dev
+
+fullnameOverride: postgres
+
+existingSecret: postgres-credentials
+
+auth:
+  database: outline
+  username: outline
+  passwordKey: password
+
+image:
+  repository: docker.io/library/postgres
+  tag: "17.10"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 5432
+  annotations: {}
+
+nodePort:
+  enabled: false
+  name: postgres-nodeport
+  port: 5432
+  nodePort: null
+  annotations: {}
+
+persistence:
+  enabled: true
+  hostPath: ""
+  size: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  storageClass: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi
+
+podAnnotations: {}
+podSecurityContext: {}
+securityContext: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+extraEnv: []

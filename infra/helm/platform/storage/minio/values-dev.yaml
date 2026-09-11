@@ -1,0 +1,41 @@
+global:
+  namespace: storage-minio-dev
+  env: dev
+
+persistence:
+  hostPath: /data/k3s/dev/platform/storage/minio
+
+nodePort:
+  enabled: true
+  name: minio-nodeport
+  apiPort: 9000
+  consolePort: 9001
+  apiNodePort: 32090
+  consoleNodePort: 32091
+
+ingress:
+  className: traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    cert-manager.io/cluster-issuer: letsencrypt-dns01-dev
+  hosts:
+    api:
+      host: storage-minio-api-dev.l2cteam.work
+      path: /
+    console:
+      host: storage-minio-console-dev.l2cteam.work
+      path: /
+  tls:
+    - secretName: storage-minio-dev-tls
+      hosts:
+        - storage-minio-api-dev.l2cteam.work
+        - storage-minio-console-dev.l2cteam.work
+
+nodeSelector:
+  kubernetes.io/hostname: server02
+
+extraEnv:
+  - name: MINIO_SERVER_URL
+    value: https://storage-minio-api-dev.l2cteam.work
+  - name: MINIO_BROWSER_REDIRECT_URL
+    value: https://storage-minio-console-dev.l2cteam.work

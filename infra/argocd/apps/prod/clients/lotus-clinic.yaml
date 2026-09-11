@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: lotus-clinic-prod
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://gitlab.com/hnq-tech/hnq-infra.git
+    targetRevision: main
+    path: infra/helm/clients/obgyn-clinic-service
+    helm:
+      releaseName: lotus-clinic
+      valueFiles:
+        - values.yaml
+        - lotus-clinic/values-prod.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: lotus-clinic-prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true

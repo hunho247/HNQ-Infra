@@ -1,0 +1,63 @@
+global:
+  env: dev
+  namespace: biboo-clinic-dev
+  appName: biboo-clinic
+  host: client-biboo-clinic-dev.l2cteam.work
+backend:
+  fullnameOverride: backend-service
+  image: registry.gitlab.com/hnq-tech/clients/lotus-clinic/lotus-backend:6aebe241
+  imagePullPolicy: IfNotPresent
+  replicas: 1
+  containerPort: 1001
+  env:
+    - name: APP_ENV
+      value: "dev"
+  secretName: biboo-clinic-backend-secrets
+  keystoreSecretName: biboo-clinic-keystore
+  firebaseSecretName: hnq-obgyn-clinic-service
+  firebaseSecretKey: firebase-credentials.json
+  configFile: biboo-clinic/config/config_dev.yaml
+  readinessProbe:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 3
+    periodSeconds: 10
+  livenessProbe:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+serviceAccount:
+  create: false
+  name: default
+  imagePullSecrets:
+    - name: lotus-clinic-registry
+service:
+  port: 80
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    cert-manager.io/cluster-issuer: letsencrypt-dns01-dev
+  path: /
+  tls:
+    enabled: true
+    secretName: client-biboo-clinic-dev-tls
+nodeSelector:
+  kubernetes.io/hostname: server02
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+affinity: {}
+serviceMonitor:
+  enabled: true
+  interval: 15s

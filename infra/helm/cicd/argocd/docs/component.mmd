@@ -1,0 +1,27 @@
+flowchart LR
+    subgraph G[Git Repository]
+        M[Manifests / Helm / Kustomize]
+    end
+
+    subgraph ACD[Argo CD Namespace]
+        SRV[API Server
+        argocd-server]
+        CTRL[Application Controller]
+        REPO[Repo Server]
+        DB[(Argo CD DB)]
+    end
+
+    subgraph K8S[Kubernetes Cluster]
+        APP1[Ứng dụng A]
+        APP2[Ứng dụng B]
+    end
+
+    M --> REPO
+    REPO --> CTRL
+    CTRL -->|Sync| APP1
+    CTRL -->|Sync| APP2
+
+    SRV --> UI[Web UI / CLI]
+    UI --> SRV
+    CTRL --> DB
+    SRV --> DB

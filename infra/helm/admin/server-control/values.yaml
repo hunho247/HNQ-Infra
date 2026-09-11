@@ -1,0 +1,116 @@
+global:
+  namespace: server-control
+  env: dev
+
+fullnameOverride: server-control
+
+image:
+  repository: registry.example.com/server-control
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 3000
+  targetPort: 3000
+
+ingress:
+  enabled: false
+  className: traefik
+  annotations: {}
+  hosts:
+    - host: server-control.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    enabled: false
+    secretName: ""
+
+persistence:
+  enabled: true
+  storageClass: ""
+  size: 1Gi
+  accessMode: ReadWriteOnce
+  mountPath: /data
+
+# hostNetwork is required for Wake-on-LAN UDP broadcast to reach LAN hosts.
+# When enabled, the pod shares the node's network namespace.
+# The pod must run on a node connected to the same LAN as the target servers.
+hostNetwork:
+  enabled: false
+
+existingSecret: ""
+
+env:
+  - name: NODE_ENV
+    value: "production"
+  - name: PORT
+    value: "3000"
+  - name: DATABASE_PATH
+    value: "/data/server-control.db"
+  - name: STATUS_CHECK_INTERVAL
+    value: "30000"
+  - name: SSH_CONNECT_TIMEOUT
+    value: "10000"
+
+# Sensitive env vars sourced from a Kubernetes Secret.
+# The Secret must contain: ADMIN_USERNAME, ADMIN_PASSWORD_HASH, JWT_SECRET
+envFromSecret:
+  enabled: false
+  secretName: ""
+
+# SSH private keys: mount a Secret containing SSH keys so the app can
+# authenticate against managed servers. Set sshPrivateKeyPath in the
+# server config to e.g. /ssh-keys/id_rsa
+sshKeys:
+  enabled: false
+  secretName: ""
+  mountPath: /ssh-keys
+
+serviceAccount:
+  create: false
+  name: default
+  imagePullSecrets: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+readinessProbe:
+  enabled: true
+  path: /api/health
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+livenessProbe:
+  enabled: true
+  path: /api/health
+  initialDelaySeconds: 15
+  periodSeconds: 20
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podSecurityContext: {}
+securityContext: {}
+
+# Cloudflare Tunnel: deploy cloudflared as a sidecar alongside the app.
+# Provide a tunnel token via a Kubernetes Secret (key: token).
+cloudflareTunnel:
+  enabled: false
+  image: cloudflare/cloudflared:latest
+  tokenSecretName: ""
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi

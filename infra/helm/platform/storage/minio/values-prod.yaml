@@ -1,0 +1,58 @@
+global:
+  namespace: storage-minio-prod
+  env: prod
+
+persistence:
+  hostPath: /home/hnq/hnq_data/prod/platform/storage/minio
+
+nodePort:
+  enabled: true
+  name: minio-nodeport
+  apiPort: 9000
+  consolePort: 9001
+  apiNodePort: 32080
+  consoleNodePort: 32081
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+
+ingress:
+  className: traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    cert-manager.io/cluster-issuer: letsencrypt-dns01-prod
+  hosts:
+    api:
+      host: storage-minio-api.l2cteam.work
+      path: /
+    console:
+      host: storage-minio-console.l2cteam.work
+      path: /
+  tls:
+    - secretName: storage-minio-prod-tls
+      hosts:
+        - storage-minio-api.l2cteam.work
+        - storage-minio-console.l2cteam.work
+
+nodeSelector:
+  kubernetes.io/hostname: hnq-server-vietnix-01-hjnu
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
+extraEnv:
+  - name: MINIO_SERVER_URL
+    value: https://storage-minio-api.l2cteam.work
+  - name: MINIO_BROWSER_REDIRECT_URL
+    value: https://storage-minio-console.l2cteam.work
+  # Container sees the host's 9.7Gi via /proc/meminfo, not the cgroup cap,
+  # so the Go runtime needs the ceiling stated explicitly. 80% of the 2Gi
+  # limit, leaving room for page cache and stacks.
+  - name: GOMEMLIMIT
+    value: "1600MiB"

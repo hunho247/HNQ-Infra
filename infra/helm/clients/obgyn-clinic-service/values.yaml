@@ -1,0 +1,61 @@
+global:
+  env: dev
+  namespace: clinic-dev
+  appName: obgyn-clinic-service
+  host: clinic.local
+
+backend:
+  fullnameOverride: backend-service
+  image: registry.gitlab.com/hnq-tech/clients/lotus-clinic/lotus-backend:f1eb557d
+  imagePullPolicy: IfNotPresent
+  replicas: 1
+  containerPort: 1001
+  env: []
+  secretName: ""
+  keystoreSecretName: ""
+  firebaseSecretName: ""
+  firebaseSecretKey: firebase-credentials.json
+  configFile: ""
+  readinessProbe:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 3
+    periodSeconds: 10
+  livenessProbe:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+
+service:
+  port: 80
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+  hosts: []
+  path: /
+  tls:
+    enabled: false
+
+serviceAccount:
+  create: false
+  name: default
+  imagePullSecrets: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+serviceMonitor:
+  enabled: false
+  interval: 15s

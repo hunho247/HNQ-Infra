@@ -1,0 +1,6 @@
+apiVersion: v2
+name: opensearch
+description: Helm chart to deploy OpenSearch (single-node) on k3s
+type: application
+version: 0.1.0
+appVersion: "2.19.4"

@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "obgyn-clinic-service.backendFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: backend-service
+    app.kubernetes.io/name: backend-service
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.backend.replicas }}
+  selector:
+    matchLabels:
+      app: backend-service
+  template:
+    metadata:
+      labels:
+        app: backend-service
+        app.kubernetes.io/name: backend-service
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      {{- if .Values.serviceAccount }}
+      serviceAccountName: {{ .Values.serviceAccount.name | default "default" }}
+      {{- end }}
+      {{- $sa := .Values.serviceAccount | default dict }}
+      {{- $pullSecrets := default $sa.imagePullSecrets .Values.backend.imagePullSecrets }}
+      {{- with $pullSecrets }}
+      imagePullSecrets:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: backend-service
+          image: {{ .Values.backend.image }}
+          imagePullPolicy: {{ .Values.backend.imagePullPolicy | default "IfNotPresent" }}
+          {{- if or .Values.backend.env .Values.backend.config .Values.backend.configFile }}
+          env:
+            {{- range .Values.backend.env }}
+            - name: {{ .name | quote }}
+              {{- if hasKey . "valueFrom" }}
+              valueFrom:
+{{- toYaml .valueFrom | nindent 16 }}
+              {{- else }}
+              value: {{ .value | quote }}
+              {{- end }}
+            {{- end }}
+            {{- if or .Values.backend.config .Values.backend.configFile }}
+            - name: APP_CONFIG_YAML
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "obgyn-clinic-service.backendFullname" . }}-config
+                  key: APP_CONFIG_YAML
+            {{- end }}
+          {{- end }}
+          {{- if .Values.backend.secretName }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.backend.secretName }}
+          {{- end }}
+          {{- if or .Values.backend.keystoreSecretName .Values.backend.firebaseSecretName }}
+          volumeMounts:
+            {{- if .Values.backend.keystoreSecretName }}
+            - name: keystore
+              mountPath: /app/app/keystore
+              readOnly: true
+            {{- end }}
+            {{- if .Values.backend.firebaseSecretName }}
+            - name: firebase-credentials
+              mountPath: /app/app/firebase-credentials.json
+              subPath: {{ .Values.backend.firebaseSecretKey | default "firebase-credentials.json" }}
+              readOnly: true
+            {{- end }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.backend.containerPort }}
+          {{- if and .Values.backend.readinessProbe .Values.backend.readinessProbe.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.backend.readinessProbe.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.backend.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.backend.readinessProbe.periodSeconds }}
+          {{- end }}
+          {{- if and .Values.backend.livenessProbe .Values.backend.livenessProbe.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.backend.livenessProbe.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.backend.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.backend.livenessProbe.periodSeconds }}
+          {{- end }}
+          resources:
+{{ toYaml .Values.backend.resources | indent 12 }}
+      {{- if or .Values.backend.keystoreSecretName .Values.backend.firebaseSecretName }}
+      volumes:
+        {{- if .Values.backend.keystoreSecretName }}
+        - name: keystore
+          secret:
+            secretName: {{ .Values.backend.keystoreSecretName }}
+        {{- end }}
+        {{- if .Values.backend.firebaseSecretName }}
+        - name: firebase-credentials
+          secret:
+            secretName: {{ .Values.backend.firebaseSecretName }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+{{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,95 @@
+env: "dev"
+debug: true
+server:
+  address: ":1001"
+context:
+  timeout: "5s"
+database:
+  host: "mariadb.storage-mariadb-dev"
+  port: "3306"
+  name: "lotus_clinic"
+  logLevel: "error"
+  connectionTimeout: "5s"
+pushNotify:
+  host: "push-notify.push-notify-dev.svc.cluster.local"
+  port: ":10080"
+  reminderLeadTime: "1h"
+  interval: "1m"
+startupBillBackfill:
+  from: "260129"
+  to: "260609"
+  limit: 0
+search:
+  host: "opensearch.storage-opensearch-dev"
+  port: ":9200"
+  index:
+    users:
+      name: "lotus-clinic-dev-users"
+      minScore: 40
+minio:
+  endpoint: "storage-minio-api-dev.l2cteam.work"
+  bucket: "lotus-clinic"
+  expire: "600m"
+  useSSL: true
+token:
+  expireAccessToken: "1m"
+  expireRefreshToken: "168h"
+  privateKeyPath: "./app/keystore/private.pem"
+  publicKeyPath: "./app/keystore/public.pem"
+app:
+  slowTime: 5
+  captcha:
+    enable: false
+  oauth2:
+    firebase:
+      credentialFilePath: "/app/app/firebase-credentials.json"
+      projectId: "hnq-obgyn-clinic-service"
+    google:
+      redirectURL: "https://dev.backend.giaan.l2c.dev/user/login/callback/google"
+      scopes:
+        - "profile"
+        - "email"
+    facebook:
+      redirectURL: "https://dv/user/login/callback/facebook"
+      scopes:
+        - "public_profile"
+        - "email"
+  basePath: "dev"
+  assetPath: "public/asset"
+  rateLimit:
+    default:
+      enable: true
+      period: "minute"
+      limit: 50
+    intensive:
+      enable: true
+      period: "minute"
+      limit: 5
+  checkDeviceDoctor: false
+logging:
+  config:
+    level: debug
+    disableCaller: false
+    encoding: "json"
+    outputPaths:
+      - "stdout"
+    errorOutputPaths:
+      - "stderr"
+    encoderConfig:
+      timeKey: "ts"
+      levelKey: "level"
+      nameKey: "logger"
+      callerKey: "caller"
+      functionKey: ""
+      messageKey: "msg"
+      stacktraceKey: "stacktrace"
+      lineEnding: "\n"
+      levelEncoder: "capital"
+      timeEncoder: "ISO8601"
+      durationEncoder: "s"
+      callerEncoder: "short"
+  logPath: "/var/log/lotus/lotus_service.log"
+  rotate:
+    maxSize: 1
+    maxBackups: 2
+    maxAge: 30
