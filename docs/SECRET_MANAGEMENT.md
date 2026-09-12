@@ -3,9 +3,9 @@
 | | |
 |---|---|
 | **Trạng thái** | Bản nháp, chờ duyệt |
-| **Ngày** | 11/09/2026 |
-| **Bối cảnh** | Hệ thống mới, đội 3 người, repo GitHub, 1 branch `main` |
-| **Liên quan** | [REFACTOR_PLAN.md](./REFACTOR_PLAN.md) · [K3S_OPERATIONS.md](./K3S_OPERATIONS.md) |
+| **Ngày** | 12/09/2026 |
+| **Bối cảnh** | Hệ thống mới, **1 người vận hành**, repo GitHub, 1 branch `main` |
+| **Liên quan** | [REFACTOR_PLAN.md](./REFACTOR_PLAN.md) · [K3S_OPERATIONS.md](./K3S_OPERATIONS.md) · [DISASTER_RECOVERY.md](./DISASTER_RECOVERY.md) |
 
 ---
 
@@ -13,9 +13,11 @@
 
 **Sealed Secrets.** Secret được mã hoá bằng public key của controller trước khi commit. Chỉ controller trong cluster giải mã được. File mã hoá an toàn để đẩy lên GitHub, kể cả repo public.
 
-Với đội 3 người mà ai cũng có quyền vào cluster, quy trình gọn nhất là **dùng `kubeseal` ở máy mình** — bản rõ không đi qua hệ thống nào khác. Không cần backend, không cần UI, không có bề mặt tấn công mới.
+Với 1 người vận hành có quyền vào cluster, quy trình gọn nhất là **dùng `kubeseal` ở máy mình** — bản rõ không đi qua hệ thống nào khác. Không cần backend, không cần UI, không có bề mặt tấn công mới.
 
-Không có UI quản lý secret, và đó là quyết định có chủ ý: thêm một đường cho secret đi qua là thêm một chỗ có thể rò rỉ, đổi lại tiện lợi mà 3 người không thật sự cần.
+Không có UI quản lý secret, và đó là quyết định có chủ ý: thêm một đường cho secret đi qua là thêm một chỗ có thể rò rỉ, đổi lại tiện lợi mà 1 người không thật sự cần.
+
+> ⚠️ **Sealing key là món #3 của [recovery kit](./DISASTER_RECOVERY.md#2-recovery-kit--ba-thứ-phải-luôn-có).** Mất nó thì mọi file trong `secrets/` thành vô nghĩa và phải tạo lại **toàn bộ** secret bằng tay. Với 1 người, đây là một trong hai rủi ro 🔴 cao nhất của cả hệ thống.
 
 ---
 
@@ -159,11 +161,14 @@ File này **là bí mật cấp cao nhất của hệ thống**. Ai có nó thì
 
 | Nơi | Ghi chú |
 |---|---|
-| ✅ Password manager của đội (1Password / Bitwarden) | Mục riêng, cả 3 người truy cập được |
+| ✅ Password manager (1Password / Bitwarden) | Cùng mục với [recovery kit](./DISASTER_RECOVERY.md#2-recovery-kit--ba-thứ-phải-luôn-có) — snapshot, k3s token, sealing key nằm chung một chỗ |
 | ✅ USB mã hoá, cất nơi an toàn | Bản offline, phòng khi mất password manager |
+| ✅ **Emergency access cho 1 người thứ hai** | Bắt buộc khi chỉ có 1 người vận hành — xem dưới |
 | ❌ Trong repo Git | Vô nghĩa — vòng lặp |
 | ❌ Trong chính cluster | Cluster chết là mất cả hai |
-| ❌ Chỉ một người giữ | Với đội 3 người, người đó nghỉ là kẹt |
+| ❌ Chỉ một người giữ, không có đường dự phòng | **Đây là mặc định khi chỉ có 1 người, và phải chủ động phá bỏ nó** |
+
+⚠️ **Với 1 người, "cất 2 nơi" chưa đủ — cả 2 nơi đó đều chỉ mình bạn vào được.** Nếu bạn mất thiết bị, mất khả năng đăng nhập, hoặc đơn giản là không liên lạc được, thì sealing key coi như mất. Bật **emergency access** (1Password Emergency Kit / Bitwarden Emergency Access) cho một người bạn tin — người đó không cần biết Kubernetes, chỉ cần mở được mục đó khi cần. Đây là việc của P6 trong [lộ trình](./REFACTOR_PLAN.md#p6--prod-3-ngày), cùng với `docs/BREAK_GLASS.md`.
 
 Sau khi cất xong: `shred -u ~/sealing-key-*.yaml`
 
@@ -173,7 +178,7 @@ Sealed Secrets tạo key mới định kỳ và **giữ lại key cũ** để gi
 
 **Khuyến nghị:** giữ tự xoay key, và **đặt lịch nhắc backup lại mỗi quý**. Một sự kiện lặp trong calendar là đủ.
 
-### Kiểm tra khôi phục — bắt buộc một lần ở Tuần 5
+### Kiểm tra khôi phục — bắt buộc một lần ở P5
 
 ```bash
 k3d cluster create test-restore
@@ -252,13 +257,13 @@ Script `seal-secret.sh` cập nhật `secretChecksum` trong `values-<env>.yaml` 
 
 | Loại | Chu kỳ |
 |---|---|
-| Mật khẩu database | 6 tháng, hoặc ngay khi có người rời đội |
+| Mật khẩu database | 6 tháng, hoặc ngay khi nghi lộ |
 | Khoá ký JWT | 3 tháng |
 | Access key MinIO | 6 tháng |
 | Token GitHub / registry | 12 tháng, hoặc dùng token có hạn |
 | **Bất kỳ secret nào nghi lộ** | **Ngay lập tức** |
 
-> Với 3 người, một lịch nhắc hằng quý để rà lại toàn bộ là thực tế hơn là đặt lịch riêng cho từng secret.
+> Với 1 người, một lịch nhắc hằng quý để rà lại toàn bộ là thực tế hơn là đặt lịch riêng cho từng secret — và nó đã nằm trong [lịch vận hành hằng quý](./K3S_OPERATIONS.md#11-lịch-vận-hành), không phải một lịch riêng phải tự nhớ.
 
 ---
 
@@ -301,18 +306,19 @@ Vào `docs/RUNBOOK.md`: lộ thế nào, phát hiện ra sao, và **đổi gì �
 
 ## 7. Danh sách kiểm tra
 
-### Khi dựng hệ thống (Tuần 1)
+### Khi dựng hệ thống (P1)
 
 - [ ] Sealed Secrets controller đã chạy
-- [ ] **Sealing key đã backup ra ngoài cluster, cất ở 2 nơi, cả 3 người truy cập được**
+- [ ] **Sealing key đã backup ra ngoài cluster, cất ở 2 nơi**
+- [ ] **Emergency access của password manager đã bật cho 1 người thứ hai**
 - [ ] `gitleaks` chạy trong GitHub Actions
 - [ ] `secrets/README.md` liệt kê mọi secret hệ thống cần
 - [ ] `check-secrets.sh` chạy trong CI
-- [ ] `make secret` hoạt động, cả 3 người đã thử qua
+- [ ] `make secret` hoạt động, đã thử qua trên **cả máy phụ** ([K3S_OPERATIONS §4.3](./K3S_OPERATIONS.md#43-máy-phụ--bắt-buộc-không-phải-tuỳ-chọn))
 
-### Tuần 5
+### P5 — trước khi có dữ liệu thật
 
-- [ ] **Đã kiểm tra khôi phục sealing key thành công một lần**
+- [ ] **Đã kiểm tra khôi phục sealing key thành công một lần** — quy trình ở [R8 bước 4](./DISASTER_RECOVERY.md#r8--mất-toàn-bộ-cluster-dựng-lại-từ-số-không), là chỗ dễ làm sai nhất khi dựng lại cluster
 - [ ] Kết quả ghi vào `docs/RUNBOOK.md`
 - [ ] Đã đặt lịch nhắc backup lại key hằng quý
 
