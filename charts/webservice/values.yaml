@@ -18,10 +18,17 @@ command: []
 args: []
 
 containerPort: 8080
-# Đường kiểm tra sức khoẻ. hnq.probes fail template nếu rỗng.
+# http = kiểm bằng GET probePath (mặc định, và là thứ nên dùng).
+# tcp  = chỉ kiểm cổng có mở không. Dùng khi app KHÔNG có endpoint sức khoẻ:
+#        yếu hơn hẳn (cổng mở không có nghĩa app còn phục vụ được), nên coi
+#        đây là nợ, không phải lựa chọn.
+probeType: http
+# Đường kiểm tra sức khoẻ. hnq.probes fail template nếu rỗng (probeType: http).
 probePath: /health
 
 service:
+  # false = worker: không Service, không Ingress, không probe, không cổng.
+  enabled: true
   port: 80
 
 ingress:
@@ -35,10 +42,14 @@ app:
   # Secret chính (envFrom). Tên phải khớp registry/apps/<svc>/service.yaml.
   secretName: ""
   # Secret phụ mount thành file, ví dụ firebase-credentials.json.
+  # subPath: mount đúng MỘT khoá thành đúng một file, thay vì cả Secret thành
+  # một thư mục.
   fileSecrets: []
   #  - name: hnq-obgyn-clinic-service
-  #    key: firebase-credentials.json
   #    mountPath: /app/credentials
+  #  - name: gorush-credentials
+  #    mountPath: /home/gorush/google-services.json
+  #    subPath: google-services.json
   env: []
   # Nội dung file cấu hình — đến từ registry/apps/<svc>/config/config-<env>.yaml
   config: ""
@@ -49,12 +60,34 @@ app:
   configEnvVar: ""
   # Không mount ConfigMap thành file (chỉ dùng configEnvVar).
   configMount: true
+  # Trộn giá trị từ Secret vào file cấu hình trước khi app đọc — cho ứng dụng
+  # chỉ biết đọc file, không đọc biến môi trường. key là khoá trong
+  # app.secretName, đồng thời là tên biến môi trường của initContainer.
+  configInject:
+    fields: []
+    #  - path: .database.user
+    #    key: DB_USER
+    image:
+      repository: docker.io/mikefarah/yq
+      tag: "4.44.1"
 
 serviceMonitor:
   enabled: false
   interval: 30s
   path: /metrics
   port: http
+
+# PVC nhỏ cho service vốn không trạng thái (ví dụ file cấu hình do chính app
+# ghi ra). Bật nó là GẮN service vào một node: node chết thì phải theo R4 mới
+# dời được. Mặc định tắt — và nên giữ tắt.
+persistence:
+  enabled: false
+  size: 1Gi
+  mountPath: /data
+
+# hostNetwork: xem ghi chú trong templates/deployment.yaml. Bật là phải sửa cả
+# ci/policy/security.rego.
+hostNetwork: false
 
 # resources / probes / env đến từ /env/<env>.yaml. Không đặt mặc định ở đây:
 # thiếu file env là lỗi phải thấy ngay, không phải lỗi âm thầm chạy bằng giá trị khác.

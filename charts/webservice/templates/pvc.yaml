@@ -1,0 +1,18 @@
+{{- if .Values.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "hnq.fullname" . }}-data
+  namespace: {{ include "hnq.namespace" . }}
+  labels:
+{{ include "hnq.labels" . | trim | indent 4 }}
+  annotations:
+{{ include "hnq.syncWave" (dict "kind" "PersistentVolumeClaim") | trim | indent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ include "hnq.storageClass" . }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+{{- end }}

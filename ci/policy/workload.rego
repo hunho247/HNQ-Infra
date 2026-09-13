@@ -56,11 +56,17 @@ deny contains msg if {
 # phải độ dài.
 own_registry_prefixes := ["ghcr.io/hnq-tech/", "registry.gitlab.com/hnq-tech/", "registry.gitlab.com/lifetocode/"]
 
+# Ngoại lệ SHA — mỗi dòng là một món nợ nhìn thấy được, không phải một ngoại
+# lệ im lặng. Bỏ dòng đi ngay khi pipeline của repo đó gắn tag SHA.
+sha_exempt := {"registry.gitlab.com/hnq-tech/hnq-platform/server-control": "repo đó chưa gắn tag SHA; 1.1.0 là tag release cố định, không phải tag trôi"}
+
 deny contains msg if {
 	is_workload
 	some c in all_containers
 	some prefix in own_registry_prefixes
 	startswith(c.image, prefix)
+	repo := split(c.image, ":")[0]
+	not sha_exempt[repo]
 	tag := split(c.image, ":")[1]
 	not regex.match(`^[0-9a-f]{7,40}$`, tag)
 	msg := sprintf("%s/%s: container %s có tag %q — image của mình phải pin bằng git SHA", [input.kind, input.metadata.name, c.name, tag])
@@ -74,9 +80,18 @@ deny contains msg if {
 # Mỗi dòng phải có lý do.
 probe_exempt := {"system-upgrade-controller": "controller thuần watch CRD, không nhận traffic"}
 
+# Worker không có Service thì không ai gửi traffic tới, readinessProbe không
+# quyết định điều gì. Chart tự gắn nhãn này khi service.enabled: false — ngoại
+# lệ theo TÍNH CHẤT của workload, không theo tên service.
+is_worker if {
+	labels := object.get(input.spec.template.metadata, "labels", {})
+	labels["hnq.dev/workload"] == "worker"
+}
+
 deny contains msg if {
 	is_workload
 	not probe_exempt[input.metadata.name]
+	not is_worker
 	some c in object.get(pod_spec, "containers", [])
 	not c.readinessProbe
 	msg := sprintf("%s/%s: container %s thiếu readinessProbe", [input.kind, input.metadata.name, c.name])

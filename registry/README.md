@@ -53,13 +53,43 @@ prod ngay lần sync sau — **chỉ làm sau khi P5 xong** (Velero + dump hằn
 đúng cửa chặn 2 của PLAN §16. `values-prod.yaml` đã viết sẵn cho từng service
 nên bật prod là sửa đúng một dòng.
 
-## Chưa migrate — và vì sao
+## 15 service, và những chỗ phải thoả hiệp
 
-| Service cũ | Vướng | Cần gì để migrate |
+Cả 13 service của cây cũ đã sang đây (`push-notify-v2` tách thành API + worker
+nên thành 15). Bốn chỗ không khớp hoàn toàn với chart chung, mỗi chỗ khai rõ
+tại chỗ và gỡ được:
+
+| Service | Thoả hiệp | Gỡ bằng cách nào |
 |---|---|---|
-| `push-notify`, `gorush` | Chart cũ **không khai probe nào**; `webservice` bắt buộc `probePath` | Xác nhận endpoint sức khoẻ thật của hai app rồi thêm `probePath` |
-| `push-notify-v2` + worker | Worker không phải HTTP service, và chart cũ dùng initContainer `yq` để trộn secret vào file cấu hình | Chart thứ ba cho worker, hoặc đổi app đọc secret qua env |
-| `server-control` | Cần `hostNetwork` cho Wake-on-LAN — policy `ci/policy/security.rego` chặn | Quyết định có mở ngoại lệ không; nếu có thì ghi rõ lý do trong policy |
+| `push-notify` | `probeType: tcp` — chart cũ không khai probe nào, app chưa rõ có endpoint sức khoẻ không. **Cổng mở không có nghĩa app còn phục vụ được.** | Xác nhận đường `/health` của app rồi đổi sang `probeType: http` |
+| `server-control` | `hostNetwork: true` — Wake-on-LAN là broadcast UDP trong LAN, mạng pod không chuyển tiếp được | Chỉ gỡ được nếu bỏ tính năng WoL |
+| `server-control` | Tag `1.1.0` không phải git SHA | Repo đó gắn tag SHA lúc build, rồi xoá dòng trong `ci/policy/workload.rego` |
+| `gorush` | Tag `latest` của chart cũ đổi thành `1.18.5` | Renovate mở PR khi có bản mới |
 
-Ba service này vẫn nằm ở `infra/` (cây cũ) cho tới khi có quyết định — xem
-`infra/README.md`.
+Hai ngoại lệ của `server-control` nằm trong `ci/policy/*.rego` dưới dạng map có
+tên và lý do — không phải một `--force` ở đâu đó. Xoá dòng là CI chặn lại ngay.
+
+## Ứng dụng chỉ đọc file cấu hình, không đọc biến môi trường
+
+`push-notify` và `push-notify-v2` thuộc loại này. Mật khẩu không thể nằm trong
+ConfigMap (nó ở Git), nên chart dùng `app.configInject`: một initContainer chép
+cấu hình sang `emptyDir` rồi `yq` trộn giá trị từ Secret vào.
+
+```yaml
+app:
+  secretName: push-notify-config
+  configInject:
+    fields:
+      - path: .database.user
+        key: DB_USER
+```
+
+Container chính mount bản **đã trộn**, không mount ConfigMap. Giá trị bí mật chỉ
+tồn tại trong bộ nhớ của pod.
+
+## Worker không phải HTTP service
+
+`push-notify-v2-worker` khai `service.enabled: false`: không Service, không
+Ingress, không probe, không cổng. Chart gắn nhãn `hnq.dev/workload: worker` và
+`ci/policy/workload.rego` đọc nhãn đó để biết được phép bỏ `readinessProbe` —
+ngoại lệ theo **tính chất** của workload, không theo tên service.

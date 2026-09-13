@@ -1,0 +1,39 @@
+# server-control — dev. Chỉ ghi phần KHÁC mặc định.
+#
+# Service này có HAI ngoại lệ so với mọi service khác, cả hai đều khai rõ trong
+# ci/policy/ và có thể gỡ:
+#
+#   1. hostNetwork: true — Wake-on-LAN là broadcast UDP trong LAN, mạng pod của
+#      flannel không chuyển tiếp được. Ngoại lệ ở ci/policy/security.rego.
+#   2. tag không phải git SHA — pipeline của repo đó chưa gắn SHA. 1.1.0 là tag
+#      release cố định, không phải tag trôi. Ngoại lệ ở ci/policy/workload.rego.
+#
+# ⚠️ hostNetwork nghĩa là cổng 3000 của pod chiếm cổng 3000 THẬT trên node.
+image:
+  repository: registry.gitlab.com/hnq-tech/hnq-platform/server-control
+  tag: "1.1.0"
+
+imagePullSecrets:
+  - name: server-control-registry
+
+hostNetwork: true
+
+containerPort: 3000
+probePath: /api/health
+
+ingress:
+  host: admin-server-control-dev.l2cteam.work
+
+app:
+  secretName: server-control-credentials
+
+# PVC nhỏ giữ danh sách máy và lịch sử thao tác. Bật persistence là GẮN service
+# vào một node — chấp nhận được vì nó vốn phải nằm cùng LAN với máy cần đánh
+# thức. Velero File System Backup phủ PVC này.
+persistence:
+  enabled: true
+  size: 1Gi
+  mountPath: /data
+
+serviceMonitor:
+  enabled: false

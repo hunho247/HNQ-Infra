@@ -1,0 +1,15 @@
+apiVersion: hnq.dev/v1
+kind: ServiceRelease
+metadata:
+  name: gorush
+spec:
+  category: app
+  chart: webservice
+  # Nạp thêm /registry/apps/gorush/config/config-<env>.yaml
+  config: true
+  environments:
+    - env: dev
+  requiredSecrets:
+    # Khoá đẩy thông báo: google-services.json (FCM) và AuthKey .p8 (APNs).
+    - name: gorush-credentials
+      keys: [google-services.json, AuthKey.p8]

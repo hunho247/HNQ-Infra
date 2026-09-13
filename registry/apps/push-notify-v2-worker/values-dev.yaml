@@ -1,0 +1,50 @@
+# push-notify-v2 (worker) — dev. Chỉ ghi phần KHÁC mặc định.
+# Cùng image với API, khác entrypoint. Không có Service, không có Ingress,
+# không có probe: worker không nhận traffic (xem service.enabled).
+image:
+  repository: registry.gitlab.com/hnq-tech/hnq-platform/push-notify
+  tag: "2f712b9c"
+
+imagePullSecrets:
+  - name: push-notify-v2-registry
+
+command: ["/app/worker"]
+args: ["--config", "/app/configs/config.yaml"]
+
+service:
+  enabled: false
+
+app:
+  secretName: push-notify-v2-config
+  configMountPath: /app/configs
+  configInject:
+    fields:
+      - path: .database.host
+        key: DB_HOST
+      - path: .database.port
+        key: DB_PORT
+      - path: .database.name
+        key: DB_NAME
+      - path: .database.user
+        key: DB_USER
+      - path: .database.pass
+        key: DB_PASS
+      - path: .internal_api_key
+        key: INTERNAL_API_KEY
+  fileSecrets:
+    - name: push-notify-v2-firebase
+      mountPath: /app/firebase/service-account.json
+      subPath: service-account.json
+  env:
+    - name: APP_ENV
+      value: "dev"
+    - name: APP_CONFIG_FILE
+      value: "/app/configs/config.yaml"
+    - name: PUSH_FIREBASE_SERVICE_ACCOUNT_PATH
+      value: "/app/firebase/service-account.json"
+    - name: RUN_MIGRATIONS
+      value: "false"
+    - name: RUN_SEED
+      value: "false"
+    - name: TZ
+      value: "Asia/Ho_Chi_Minh"

@@ -1,0 +1,51 @@
+# Cấu hình push-notify-v2 (prod) — VALUES FILE, nội dung nằm dưới app.config.
+# API và worker dùng CHUNG nội dung này; giá trị bí mật (database.*,
+# internal_api_key) do initContainer trộn vào từ Secret push-notify-v2-config.
+app:
+  config: |
+    app_env: prod
+    http_port: "10080"
+    internal_api_key: internal-secret
+    database:
+      host: "storage-mariadb.storage-mariadb-prod"
+      port: "3306"
+      name: "db_push_notify_v2_prod"
+      charset: "utf8mb4"
+      parseTime: true
+      loc: "UTC"
+    logging:
+      config:
+        level: info
+        disableCaller: false
+        encoding: "json"
+        outputPaths:
+          - "stdout"
+        errorOutputPaths:
+          - "stderr"
+        encoderConfig:
+          timeKey: "ts"
+          levelKey: "level"
+          nameKey: "logger"
+          callerKey: "caller"
+          functionKey: ""
+          messageKey: "msg"
+          stacktraceKey: "stacktrace"
+          lineEnding: "\n"
+          levelEncoder: "capital"
+          timeEncoder: "ISO8601"
+          durationEncoder: "s"
+          callerEncoder: "short"
+      logPath: "/l2c_notify_service.log"
+      rotate:
+        maxSize: 1
+        maxBackups: 2
+        maxAge: 30
+    push:
+      firebase:
+        service_account_path: /app/configs/service-account.json
+    worker_poll_interval: 3s
+    scheduler_interval: 5s
+    fanout_batch_size: 100
+    max_delivery_retry: 3
+    push_multicast_enabled: true
+    push_multicast_batch_size: 500

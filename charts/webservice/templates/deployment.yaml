@@ -1,3 +1,10 @@
+{{- /*
+$injectConfig: cấu hình cần trộn secret vào TRƯỚC khi app đọc. Ứng dụng nào
+chỉ biết đọc file cấu hình (không đọc env) thì đây là đường duy nhất đưa mật
+khẩu vào mà không commit nó ra Git.
+*/ -}}
+{{- $injectConfig := and .Values.app.config .Values.app.configInject.fields -}}
+{{- $mountConfig := and .Values.app.config .Values.app.configMount -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,6 +23,10 @@ spec:
     metadata:
       labels:
 {{ include "hnq.labels" . | trim | indent 8 }}
+        # Workload không có Service thì không nhận traffic, nên không cần
+        # readinessProbe. Nhãn này là thứ ci/policy/workload.rego đọc để biết
+        # được phép bỏ qua — không phải một ngoại lệ theo tên service.
+        hnq.dev/workload: {{ if .Values.service.enabled }}service{{ else }}worker{{ end }}
       {{- if or .Values.app.config .Values.podAnnotations }}
       annotations:
         {{- if .Values.app.config }}
@@ -27,6 +38,13 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ .Values.serviceAccount.name | default "default" }}
+      {{- if .Values.hostNetwork }}
+      # hostNetwork: pod dùng chung network namespace với node. Chỉ bật khi
+      # ứng dụng thật sự cần (broadcast UDP của Wake-on-LAN), và phải có tên
+      # trong ci/policy/security.rego thì CI mới cho qua.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
 {{ toYaml . | trim | indent 8 }}
@@ -37,6 +55,51 @@ spec:
       {{- end }}
 {{ include "hnq.nodeSelector" . | trim | indent 6 }}
 {{- with (include "hnq.tolerations" .) }}{{ . | nindent 6 }}{{- end }}
+      {{- if $injectConfig }}
+      initContainers:
+        # Chép cấu hình từ ConfigMap sang emptyDir rồi trộn giá trị từ Secret
+        # vào. ConfigMap giữ nguyên phần đọc được trong Git; phần bí mật chỉ
+        # tồn tại trong bộ nhớ của pod.
+        - name: config-inject
+          image: {{ include "hnq.image" (dict "ctx" . "image" .Values.app.configInject.image) | quote }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              cp /config/{{ .Values.app.configFileName }} /work/{{ .Values.app.configFileName }}
+              {{- range .Values.app.configInject.fields }}
+              # if/fi chứ không phải "[ ... ] && ...": với set -e, một lệnh test
+              # trả về sai ở dòng cuối là initContainer thoát mã 1 và pod không
+              # bao giờ khởi động.
+              if [ -n "${{ "{" }}{{ .key }}:-{{ "}" }}" ]; then
+                yq eval -i '{{ .path }} = strenv({{ .key }})' /work/{{ $.Values.app.configFileName }}
+              fi
+              {{- end }}
+          env:
+            {{- range .Values.app.configInject.fields }}
+            - name: {{ .key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "app.configInject cần app.secretName" $.Values.app.secretName }}
+                  key: {{ .key }}
+                  # optional: thiếu key thì giữ giá trị trong ConfigMap, không
+                  # làm pod chết ngay lúc khởi động.
+                  optional: true
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: config-merged
+              mountPath: /work
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      {{- end }}
       containers:
         - name: {{ include "hnq.name" . }}
           image: {{ include "hnq.image" (dict "ctx" . "image" .Values.image) | quote }}
@@ -53,10 +116,12 @@ spec:
           securityContext:
 {{ toYaml . | trim | indent 12 }}
           {{- end }}
+          {{- if .Values.service.enabled }}
           ports:
             - name: http
               containerPort: {{ .Values.containerPort }}
               protocol: TCP
+          {{- end }}
           {{- if or .Values.app.env (and .Values.app.config .Values.app.configEnvVar) }}
           env:
             {{- with .Values.app.env }}
@@ -75,12 +140,21 @@ spec:
             - secretRef:
                 name: {{ .Values.app.secretName }}
           {{- end }}
+          {{- if .Values.service.enabled }}
+          {{- if eq .Values.probeType "tcp" }}
+{{ include "hnq.tcpProbes" (dict "ctx" . "port" "http") | trim | indent 10 }}
+          {{- else }}
 {{ include "hnq.probes" (dict "ctx" . "path" .Values.probePath "port" "http") | trim | indent 10 }}
+          {{- end }}
+          {{- end }}
 {{ include "hnq.resources" (dict "ctx" . "resources" .Values.resources) | trim | indent 10 }}
-          {{- $mountConfig := and .Values.app.config .Values.app.configMount }}
-          {{- if or $mountConfig .Values.app.fileSecrets }}
+          {{- if or $mountConfig $injectConfig .Values.app.fileSecrets .Values.persistence.enabled }}
           volumeMounts:
-            {{- if $mountConfig }}
+            {{- if $injectConfig }}
+            - name: config-merged
+              mountPath: {{ .Values.app.configMountPath }}
+              readOnly: true
+            {{- else if $mountConfig }}
             - name: config
               mountPath: {{ .Values.app.configMountPath }}
               readOnly: true
@@ -88,19 +162,35 @@ spec:
             {{- range .Values.app.fileSecrets }}
             - name: secret-{{ .name }}
               mountPath: {{ .mountPath }}
+              {{- with .subPath }}
+              subPath: {{ . }}
+              {{- end }}
               readOnly: true
             {{- end }}
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+            {{- end }}
           {{- end }}
-      {{- if or $mountConfig .Values.app.fileSecrets }}
+      {{- if or $mountConfig $injectConfig .Values.app.fileSecrets .Values.persistence.enabled }}
       volumes:
-        {{- if $mountConfig }}
+        {{- if or $mountConfig $injectConfig }}
         - name: config
           configMap:
             name: {{ include "hnq.fullname" . }}-config
+        {{- end }}
+        {{- if $injectConfig }}
+        - name: config-merged
+          emptyDir: {}
         {{- end }}
         {{- range .Values.app.fileSecrets }}
         - name: secret-{{ .name }}
           secret:
             secretName: {{ .name }}
+        {{- end }}
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "hnq.fullname" . }}-data
         {{- end }}
       {{- end }}

@@ -41,9 +41,19 @@ deny contains msg if {
 	msg := sprintf("%s/%s: khai toleration hnq.dev/dedicated — chỉ 5 thành phần platform ở PLAN §2 được lách taint của master", [input.kind, input.metadata.name])
 }
 
+# Ngoại lệ hostNetwork. Cái giá: pod thấy toàn bộ network namespace của node,
+# và cổng của nó chiếm cổng thật trên node. Chỉ mở khi KHÔNG có đường khác.
+#
+# server-control đánh thức máy trong LAN bằng gói Wake-on-LAN — đó là broadcast
+# UDP tới địa chỉ L2 của LAN, mạng pod của flannel không chuyển tiếp được.
+# Không hostNetwork thì tính năng chính của nó không chạy.
+# Bù lại: không privileged, không hostPath, và service này chỉ ở máy nhà.
+hostnetwork_exempt := {"server-control": "Wake-on-LAN là broadcast UDP trong LAN — mạng pod không chuyển tiếp được"}
+
 deny contains msg if {
 	some ps in pod_specs
 	ps.hostNetwork == true
+	not hostnetwork_exempt[input.metadata.name]
 	msg := sprintf("%s/%s: hostNetwork=true — pod dùng chung network namespace với node", [input.kind, input.metadata.name])
 }
 

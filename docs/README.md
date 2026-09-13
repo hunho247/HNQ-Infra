@@ -9,8 +9,8 @@ Hệ thống: **k3s + ArgoCD**, 1 VPS thuê (master) + 2 máy ở nhà (node), j
 | **[RECOVERY.md](./RECOVERY.md)** | **Đang có sự cố.** Bắt đầu ở "60 giây đầu tiên", nhảy tới đúng một quy trình. Đọc trước một lần lúc bình thường. |
 | [RESEARCH_BEST_PRACTICES.md](./RESEARCH_BEST_PRACTICES.md) | Hồ sơ tra cứu — cơ sở cho các quyết định trong PLAN §1. **Không cần đọc để triển khai.** |
 | [LEGACY_LAYOUT.md](./LEGACY_LAYOUT.md) | Quy ước thư mục của hệ thống cũ (`/home/server01/srv`). Chỉ mở khi cần tra cứu cái đang chạy. |
-| `RUNBOOK.md` | Chưa có — viết ở P6, và bổ sung **mỗi lần gặp sự cố thật** |
-| `BREAK_GLASS.md` | Chưa có — viết ở P6, một trang cho người **không** biết Kubernetes |
+| [RUNBOOK.md](./RUNBOOK.md) | Bước đầu tiên theo triệu chứng + **nhật ký sự cố**. Bổ sung **mỗi lần gặp sự cố thật** — và ghi ngay vào mục "Trạng thái bất thường đang bật" mỗi khi tắt một cơ chế an toàn. |
+| [BREAK_GLASS.md](./BREAK_GLASS.md) | Một trang cho người **không** biết Kubernetes, dùng khi không liên lạc được với người vận hành. ⚠️ Còn nhiều `<...>` chưa điền. |
 
 ## Ba thứ nhớ nằm lòng
 

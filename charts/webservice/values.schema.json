@@ -27,13 +27,28 @@
       }
     },
     "containerPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "probeType": { "enum": ["http", "tcp"] },
     "probePath": { "type": "string", "pattern": "^(/.*)?$" },
     "service": {
       "type": "object",
       "required": ["port"],
-      "properties": { "port": { "type": "integer", "minimum": 1, "maximum": 65535 } },
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      },
       "additionalProperties": false
     },
+    "persistence": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "storageClass": { "const": "hnq-local" },
+        "size": { "type": "string" },
+        "mountPath": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "hostNetwork": { "type": "boolean" },
     "ingress": {
       "type": "object",
       "properties": {
@@ -57,7 +72,8 @@
             "properties": {
               "name": { "type": "string" },
               "key": { "type": "string" },
-              "mountPath": { "type": "string" }
+              "mountPath": { "type": "string" },
+              "subPath": { "type": "string" }
             },
             "additionalProperties": false
           }
@@ -67,7 +83,26 @@
         "configFileName": { "type": "string" },
         "configMountPath": { "type": "string" },
         "configEnvVar": { "type": "string" },
-        "configMount": { "type": "boolean" }
+        "configMount": { "type": "boolean" },
+        "configInject": {
+          "type": "object",
+          "properties": {
+            "fields": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["path", "key"],
+                "properties": {
+                  "path": { "type": "string", "pattern": "^\\." },
+                  "key": { "type": "string", "pattern": "^[A-Z0-9_]+$" }
+                },
+                "additionalProperties": false
+              }
+            },
+            "image": { "type": "object" }
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },
@@ -100,7 +135,6 @@
       }
     },
     "probes": { "type": "object" },
-    "persistence": { "type": "object" },
     "backup": { "type": "object" },
     "podSecurityContext": { "type": "object" },
     "securityContext": { "type": "object" },

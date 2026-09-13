@@ -1,0 +1,44 @@
+# push-notify — dev. Chỉ ghi phần KHÁC mặc định.
+image:
+  repository: registry.gitlab.com/lifetocode/thanhvien-shop/push-service
+  tag: "c25d14c3"
+
+imagePullSecrets:
+  - name: push-notify-registry
+
+containerPort: 10080
+
+# ⚠️ NỢ: chart cũ không khai probe nào và app không có endpoint sức khoẻ đã
+# biết, nên tạm kiểm bằng TCP. Cổng mở KHÔNG có nghĩa app còn phục vụ được —
+# đổi sang probeType: http ngay khi xác nhận được đường /health của app.
+probeType: tcp
+
+app:
+  secretName: push-notify-config
+  configMountPath: /app/app
+  configFileName: config_dev.yaml
+  # App chỉ đọc file cấu hình, không đọc biến môi trường — nên mật khẩu phải
+  # được trộn vào file trong initContainer (xem charts/webservice).
+  configInject:
+    fields:
+      - path: .database.user
+        key: DB_USER
+      - path: .database.pass
+        key: DB_PASS
+  env:
+    - name: APP_ENV
+      value: "dev"
+    - name: APP_CONFIG_FILE
+      value: "/app/app/config_dev.yaml"
+    - name: TZ
+      value: "Asia/Ho_Chi_Minh"
+
+service:
+  port: 10080
+
+ingress:
+  # Chỉ client trong cluster gọi tới — không cần đường vào từ internet.
+  enabled: false
+
+serviceMonitor:
+  enabled: false

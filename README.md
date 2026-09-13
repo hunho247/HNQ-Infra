@@ -19,7 +19,7 @@ secrets/{dev,prod}/     SealedSecret — secrets/README.md
 nodes/                  bản mẫu /etc/rancher/k3s/config.yaml của 3 máy
 ci/                     policy conftest + script kiểm và promote
 scripts/                status · drift · backup · dr/ (⭐ nơi đi tới khi đang sự cố)
-docs/                   PLAN · OPERATIONS · RECOVERY · RESEARCH_BEST_PRACTICES
+docs/                   PLAN · OPERATIONS · RECOVERY · RUNBOOK · BREAK_GLASS
 infra/                  cây CŨ, giữ để tra cứu cho tới khi migrate xong
 ```
 

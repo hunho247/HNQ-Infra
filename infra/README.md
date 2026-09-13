@@ -45,7 +45,10 @@ Cấu trúc mới nằm ở gốc repo — `registry/`, `charts/`, `env/`, `gito
 migrate, **không có CI nào kiểm nó** (`.yamllint.yaml` bỏ qua, `render-all.sh`
 không đọc).
 
-Còn 3 service chưa migrate (`push-notify` + `gorush`, `push-notify-v2` +
-worker, `server-control`) — lý do và điều kiện để migrate ghi ở
-[registry/README.md](../registry/README.md). Xoá `infra/` khi cả ba đã sang
-cây mới.
+**Toàn bộ 13 service đã sang cây mới** (thành 15 ServiceRelease vì
+`push-notify-v2` tách API và worker). Những chỗ phải thoả hiệp khi migrate ghi
+ở [registry/README.md](../registry/README.md).
+
+Giữ `infra/` cho tới khi cả 15 Application chạy thật và `Synced/Healthy` ở dev
+(P4). Sau đó xoá — hai cây cùng mô tả một hệ thống là nguồn nhầm lẫn, không
+phải nguồn dự phòng.
