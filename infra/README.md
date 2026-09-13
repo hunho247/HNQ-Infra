@@ -35,3 +35,17 @@ infra/
 3) Thêm app/tenant mới: tạo values phù hợp trong chart tương ứng + thêm `Application` dưới `infra/argocd/apps/<env>/`.
 
 Chi tiết: xem `infra/argocd/README.md`.
+
+---
+
+## ⚠️ Cây này là bản CŨ
+
+Cấu trúc mới nằm ở gốc repo — `registry/`, `charts/`, `env/`, `gitops/` — theo
+[docs/PLAN.md](../docs/PLAN.md). Thư mục `infra/` giữ lại để tra cứu trong lúc
+migrate, **không có CI nào kiểm nó** (`.yamllint.yaml` bỏ qua, `render-all.sh`
+không đọc).
+
+Còn 3 service chưa migrate (`push-notify` + `gorush`, `push-notify-v2` +
+worker, `server-control`) — lý do và điều kiện để migrate ghi ở
+[registry/README.md](../registry/README.md). Xoá `infra/` khi cả ba đã sang
+cây mới.

@@ -1,0 +1,118 @@
+# 8 alert — TRẦN, không phải mục tiêu (PLAN §12).
+# Với 1 người không có ca trực, alert bị bỏ qua là alert vô dụng, và tệ hơn,
+# nó làm bỏ qua cả alert thật.
+#
+# Mọi rule BẮT BUỘC có annotation `action`. Không viết nổi một hành động cụ
+# thể thì alert đó không nên tồn tại — để nó là dashboard.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: hnq-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: hnq.core
+      rules:
+        - alert: NodeNotReady
+          expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "Node {{ $labels.node }} NotReady > 5 phút"
+            action: "RECOVERY.md R9 — máy sống hay chết? tailscale status trước, rồi ssh."
+
+        - alert: IngressPathDegraded
+          # Traefik / cloudflared / CoreDNS: dưới 2 pod Ready là MẤT DỰ PHÒNG,
+          # dù mọi thứ vẫn đang chạy. Đây là alert quan trọng nhất của topology
+          # này — xem PLAN §10.
+          expr: |
+            sum by (app) (
+              label_replace(
+                kube_deployment_status_replicas_ready{deployment=~"traefik|cloudflared|coredns"},
+                "app", "$1", "deployment", "(.*)"
+              )
+            ) < 2
+          for: 10m
+          labels: { severity: critical }
+          annotations:
+            summary: "{{ $labels.app }} còn dưới 2 pod Ready — đường dữ liệu mất dự phòng"
+            action: "make drift — xem pod Pending vì antiAffinity hay vì node chết."
+
+        - alert: IngressPathOnSameNode
+          # 2 replica cùng một node thì ArgoCD vẫn xanh mà dự phòng đã mất.
+          expr: |
+            count by (namespace, created_by_name) (
+              count by (namespace, created_by_name, node) (
+                kube_pod_info{created_by_name=~"traefik-.*|cloudflared-.*|coredns-.*"}
+              )
+            ) < 2
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.created_by_name }} có 2 replica nằm chung một node"
+            action: "kubectl -n kube-system get pod -o wide — kiểm nodeSelector hnq.dev/edge và antiAffinity."
+
+        - alert: NodeDiskFilling
+          expr: |
+            (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) > 0.80
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "Đĩa {{ $labels.instance }} đã dùng > 80%"
+            action: "RECOVERY.md R10 — crictl rmi --prune, rồi xem /srv/k3s/dump."
+
+        - alert: PVCFilling
+          expr: |
+            (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) > 0.85
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "PVC {{ $labels.persistentvolumeclaim }} đã dùng > 85%"
+            action: "Mở rộng size ở values-<env>.yaml, hoặc dọn dữ liệu. local-path KHÔNG tự mở rộng."
+
+        - alert: ProdPodUnhealthy
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace=~".*-prod", condition="true"} == 0
+            ) > 0
+          for: 15m
+          labels: { severity: critical }
+          annotations:
+            summary: "Pod prod {{ $labels.namespace }}/{{ $labels.pod }} không Ready > 15 phút"
+            action: "make logs SVC=<tên> ENV=prod — rồi kubectl describe pod phần Events."
+
+        - alert: BackupOverdue
+          # Lưới an toàn cuối cùng. etcd > 12h, dump > 2h, Velero > 26h.
+          expr: |
+            (time() - max(velero_backup_last_successful_timestamp{schedule="prod-daily"})) > 93600
+            or
+            (time() - max(kube_job_status_completion_time{job_name=~".*-dump-.*"})) > 7200
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "Backup quá hạn — lớp an toàn đang hỏng"
+            action: "RECOVERY.md — xử lý NGAY. kubectl -n velero get backup; kubectl get cronjob -A."
+
+        - alert: CertificateExpiringSoon
+          expr: |
+            (certmanager_certificate_expiration_timestamp_seconds - time()) < 14 * 24 * 3600
+          for: 1h
+          labels: { severity: warning }
+          annotations:
+            summary: "Chứng chỉ {{ $labels.name }} hết hạn trong dưới 14 ngày"
+            action: "kubectl describe certificate {{ $labels.name }} — thường là DNS-01 hoặc rate limit Let's Encrypt."
+
+    - name: hnq.watchdog
+      rules:
+        - alert: Watchdog
+          # Dead man's switch: alert này LUÔN bắn. Alertmanager đẩy nó tới
+          # healthchecks.io; thiếu ping 12 phút là healthchecks.io báo về điện
+          # thoại. Không có nó thì "im lặng" và "hệ thống giám sát đã chết"
+          # trông giống hệt nhau.
+          expr: vector(1)
+          labels: { severity: none }
+          annotations:
+            summary: "Giám sát còn sống"
+            action: "Nếu KHÔNG thấy alert này nữa: Prometheus hoặc Alertmanager đã chết. Kiểm trước mọi thứ khác."

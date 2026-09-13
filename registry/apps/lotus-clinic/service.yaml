@@ -1,0 +1,19 @@
+apiVersion: hnq.dev/v1
+kind: ServiceRelease
+metadata:
+  name: lotus-clinic
+spec:
+  category: app
+  chart: webservice
+  # Nạp thêm /registry/apps/lotus-clinic/config/config-<env>.yaml
+  config: true
+  environments:
+    # prod bật ở P6, sau khi P5 xong (PLAN §16, cửa chặn 2).
+    - env: dev
+  requiredSecrets:
+    - name: lotus-clinic-backend
+      keys: [DB_USER, DB_PASS, JWT_SECRET]
+    - name: lotus-clinic-keystore
+      keys: [private.pem, public.pem]
+    - name: lotus-clinic-registry
+      keys: [.dockerconfigjson]

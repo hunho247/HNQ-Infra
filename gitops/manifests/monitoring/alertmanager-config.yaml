@@ -1,0 +1,41 @@
+# Watchdog đi tới healthchecks.io (dead man's switch), phần còn lại đi tới
+# kênh riêng trên điện thoại — không lẫn với chat thường (PLAN §12).
+#
+# URL webhook nằm trong Secret alertmanager-webhooks (SealedSecret ở
+# secrets/prod/monitoring/). Alertmanager đọc file qua *_file của receiver.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: hnq
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  route:
+    receiver: phone
+    groupBy: ["alertname", "namespace"]
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
+    routes:
+      - receiver: healthchecks
+        matchers:
+          - name: alertname
+            value: Watchdog
+        # Ping đều đặn: healthchecks.io coi thiếu ping 12 phút là sự cố.
+        groupWait: 0s
+        groupInterval: 5m
+        repeatInterval: 5m
+  receivers:
+    - name: phone
+      webhookConfigs:
+        - urlSecret:
+            name: alertmanager-webhooks
+            key: phone-url
+          sendResolved: true
+    - name: healthchecks
+      webhookConfigs:
+        - urlSecret:
+            name: alertmanager-webhooks
+            key: healthchecks-url
+          sendResolved: false

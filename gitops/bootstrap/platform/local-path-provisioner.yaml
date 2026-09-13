@@ -1,0 +1,50 @@
+# Wave -3: PVC của mọi service phụ thuộc vào StorageClass này (D11).
+# ⚠️ defaultVolumeType: local là BẮT BUỘC — Velero không backup được hostPath.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: local-path-provisioner
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/rancher/local-path-provisioner
+    targetRevision: v0.0.31
+    path: deploy/chart/local-path-provisioner
+    helm:
+      values: |
+        storageClass:
+          create: false
+        storageClassConfigs:
+          hnq-local:
+            storageClass:
+              create: true
+              defaultClass: true
+              defaultVolumeType: local
+              reclaimPolicy: Retain
+              volumeBindingMode: WaitForFirstConsumer
+              pathPattern: "{{ .PVC.Namespace }}-{{ .PVC.Name }}"
+              permPattern: '0777'
+            nodePathMap:
+              - node: hnq-02
+                paths: ["/srv/k3s/data"]
+              - node: hnq-03
+                paths: ["/srv/k3s/data"]
+              # paths rỗng = từ chối cấp volume trên master.
+              - node: hnq-01
+                paths: []
+        nodeSelector:
+          hnq.dev/role: control-plane
+        tolerations:
+          - key: hnq.dev/dedicated
+            operator: Equal
+            value: control-plane
+            effect: NoSchedule
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated: { selfHeal: true, prune: false }
+    syncOptions: [ServerSideApply=true]

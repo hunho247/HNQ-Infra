@@ -1,0 +1,27 @@
+# storage-redis — prod
+# Chỉ ghi phần KHÁC mặc định của charts/datastore/values.yaml và /env/prod.yaml.
+image:
+  repository: docker.io/library/redis
+  tag: "7.4.7"
+
+port: 6379
+portName: redis
+secretName: storage-redis-credentials
+
+persistence:
+  size: 5Gi
+  mountPath: /data
+
+# Image redis chính thức không tự đọc REDIS_PASSWORD — phải truyền vào lệnh.
+command: ["sh", "-c"]
+args:
+  - exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes --dir /data
+
+backup:
+  fileSuffix: rdb.gz
+  # --rdb kéo bản sao qua giao thức replication: không cần mount /data vào
+  # pod dump, và không chặn redis như SAVE.
+  command: |
+    redis-cli -h storage-redis -a "$REDIS_PASSWORD" --no-auth-warning \
+      --rdb /tmp/dump.rdb
+    gzip -c /tmp/dump.rdb > "$DUMP_FILE"

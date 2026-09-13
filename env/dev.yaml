@@ -1,0 +1,53 @@
+# env/dev.yaml — khác biệt của môi trường dev.
+# ApplicationSet nạp file này SAU charts/<chart>/values.yaml và TRƯỚC
+# registry/apps/<service>/values-dev.yaml. Không đặt giá trị riêng của một
+# service ở đây.
+env:
+  name: dev
+  # Nhãn node của hnq-03 (PLAN §2). hnq.nodeSelector fail template nếu rỗng.
+  nodeSelector:
+    hnq.dev/env-dev: "true"
+  # cert-manager ClusterIssuer cho Ingress của môi trường này (PLAN §6).
+  clusterIssuer: letsencrypt-dns01-dev
+  domain: l2cteam.work
+  # Dev prune=true: ApplicationSet tự khai, ghi lại đây để render-all thấy.
+  prune: true
+
+image:
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+probes:
+  readiness:
+    initialDelaySeconds: 3
+    periodSeconds: 10
+    failureThreshold: 3
+  liveness:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    failureThreshold: 3
+
+persistence:
+  storageClass: hnq-local
+  size: 5Gi
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+
+backup:
+  # Dev không dump — dựng lại từ Git (PLAN §9).
+  enabled: false

@@ -1,0 +1,93 @@
+# charts/datastore/values.yaml — mặc định cho MỌI database một node.
+# Thứ tự nạp giống webservice (xem charts/webservice/values.yaml).
+#
+# Một replica là có chủ ý: cụm database nhiều node trên 3 máy một người vận
+# hành tốn nhiều hơn nó trả lại. Đường lùi là dump hằng giờ + Velero, không
+# phải replica (PLAN §9).
+
+image:
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Ghi đè entrypoint của image. Để trống là dùng mặc định của image.
+command: []
+args: []
+
+# Cổng chính của database. Probe dùng TCP vì database không có HTTP endpoint.
+port: 5432
+portName: db
+
+# Cổng phụ cần lộ ra Service (ví dụ console của MinIO).
+extraPorts: []
+#  - name: console
+#    port: 9001
+
+# Datastore mặc định KHÔNG có Ingress: database chỉ nói chuyện trong cluster.
+# Ngoại lệ là object storage — client trên trình duyệt phải tải file bằng URL
+# ký sẵn, nên host phải ra được internet.
+ingress:
+  enabled: false
+  hosts: []
+  #  - name: api                 # hậu tố tên Ingress, phải khác nhau
+  #    host: storage-minio-api-dev.l2cteam.work
+  #    port: 9000
+  className: traefik
+  annotations: {}
+
+# Secret chứa mật khẩu — envFrom. Tên phải khớp service.yaml.
+secretName: ""
+# Biến môi trường thêm cho container database. Tên KHÔNG phải "env":
+# khoá đó đã thuộc về /env/<env>.yaml.
+extraEnv: []
+
+persistence:
+  enabled: true
+  # storageClass đến từ /env/<env>.yaml, luôn là hnq-local (D11).
+  size: ""
+  mountPath: /var/lib/data
+  subPath: ""
+
+# CronJob dump hằng giờ (PLAN §9, lớp 2b). backup.enabled đến từ env/<env>.yaml:
+# prod bật, dev tắt.
+backup:
+  enabled: false
+  schedule: "0 * * * *"
+  retentionHours: 72
+  # Lệnh dump, ghi ra $DUMP_FILE. Khai ở values-<env>.yaml của service.
+  command: ""
+  # Đuôi file dump — quyết định cả tên $DUMP_FILE lẫn cái rclone đẩy đi.
+  fileSuffix: sql.gz
+  # Để trống là dùng chính image của database (client nằm sẵn trong đó).
+  image: {}
+  # PVC dump nằm trên cùng node với database (/srv/k3s/dump).
+  pvcSize: 10Gi
+  # rclone remote đã cấu hình trong Secret rclone-r2 (SealedSecret).
+  rclone:
+    enabled: true
+    secretName: rclone-r2
+    remote: "r2:hnq-dumps"
+    image:
+      repository: docker.io/rclone/rclone
+      tag: "1.68.2"
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  path: /metrics
+  # Cổng của exporter sidecar; để trống là không có exporter.
+  port: metrics
+
+exporter:
+  enabled: false
+  image: {}
+  port: 9187
+  extraEnv: []
+
+resources: {}
+podSecurityContext: {}
+securityContext: {}
+podAnnotations: {}
+tolerations: []

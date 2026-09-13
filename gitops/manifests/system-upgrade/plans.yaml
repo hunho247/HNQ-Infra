@@ -1,0 +1,52 @@
+# Hai Plan: server trước, agent sau. concurrency: 1 là BẮT BUỘC — nâng cả 2
+# máy nhà cùng lúc = cả 2 replica Traefik và cloudflared cùng xuống = mất
+# toàn bộ traffic (PLAN §15).
+#
+# Nâng k3s = sửa đúng dòng `version:` ở CẢ HAI Plan trong một PR.
+apiVersion: upgrade.cattle.io/v1
+kind: Plan
+metadata:
+  name: k3s-server
+  namespace: system-upgrade
+spec:
+  concurrency: 1
+  version: v1.31.4+k3s1
+  serviceAccountName: system-upgrade
+  cordon: true
+  upgrade:
+    image: rancher/k3s-upgrade
+  nodeSelector:
+    matchExpressions:
+      - key: hnq.dev/role
+        operator: In
+        values: ["control-plane"]
+  tolerations:
+    - key: hnq.dev/dedicated
+      operator: Equal
+      value: control-plane
+      effect: NoSchedule
+---
+apiVersion: upgrade.cattle.io/v1
+kind: Plan
+metadata:
+  name: k3s-agent
+  namespace: system-upgrade
+spec:
+  concurrency: 1
+  version: v1.31.4+k3s1
+  serviceAccountName: system-upgrade
+  cordon: true
+  drain:
+    force: true
+    skipWaitForDeleteTimeout: 60
+  # Agent chỉ nâng sau khi server đã ở đúng version.
+  prepare:
+    image: rancher/k3s-upgrade
+    args: ["prepare", "k3s-server"]
+  upgrade:
+    image: rancher/k3s-upgrade
+  nodeSelector:
+    matchExpressions:
+      - key: hnq.dev/role
+        operator: NotIn
+        values: ["control-plane"]

@@ -1,0 +1,29 @@
+# /etc/rancher/k3s/config.yaml trên hnq-01 (VPS, control-plane + etcd).
+# Tạo file này TRƯỚC khi chạy: curl -sfL https://get.k3s.io | sh -
+cluster-init: true                       # ⚠️ embedded etcd — đổi sau = cài lại
+node-name: hnq-01
+node-ip: 100.x.y.z                       # IP Tailscale
+node-external-ip: <IP public VPS>
+flannel-iface: tailscale0                # ⚠️ pod network đi qua tailnet
+write-kubeconfig-mode: "600"             # mặc định k3s là 644
+secrets-encryption: true                 # D14 — snapshot rời khỏi máy thì Secret phải mã hoá
+
+node-label:
+  - "hnq.dev/role=control-plane"
+node-taint:
+  - "hnq.dev/dedicated=control-plane:NoSchedule"   # D9 — giữ workload khỏi master
+
+disable:
+  - servicelb                            # D10 — mọi traffic vào qua Cloudflare Tunnel
+  - local-storage                        # D11 — thay bằng chart local-path-provisioner
+
+tls-san:
+  - hnq-01.<tailnet>.ts.net              # ⚠️ chìa khoá để thay VPS nhanh
+  - 100.x.y.z
+  - <IP public VPS>
+
+etcd-snapshot-schedule-cron: "0 */6 * * *"
+etcd-snapshot-retention: 20
+etcd-snapshot-dir: /srv/k3s/snapshots
+etcd-s3: true
+etcd-s3-config-secret: k3s-etcd-s3       # D13 — khoá R2 nằm trong Secret, không để thô ở đây

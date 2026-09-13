@@ -1,0 +1,18 @@
+# storage-redis — dev
+# Chỉ ghi phần KHÁC mặc định của charts/datastore/values.yaml và /env/dev.yaml.
+image:
+  repository: docker.io/library/redis
+  tag: "7.4.7"
+
+port: 6379
+portName: redis
+secretName: storage-redis-credentials
+
+persistence:
+  size: 2Gi
+  mountPath: /data
+
+# Image redis chính thức không tự đọc REDIS_PASSWORD — phải truyền vào lệnh.
+command: ["sh", "-c"]
+args:
+  - exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes --dir /data

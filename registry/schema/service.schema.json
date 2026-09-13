@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "ServiceRelease — registry/apps/<tên>/service.yaml",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "hnq.dev/v1" },
+    "kind": { "const": "ServiceRelease" },
+    "metadata": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+          "maxLength": 40
+        }
+      },
+      "additionalProperties": false
+    },
+    "spec": {
+      "type": "object",
+      "required": ["category", "chart", "config", "environments"],
+      "properties": {
+        "category": { "enum": ["app", "platform"] },
+        "chart": { "enum": ["webservice", "datastore"] },
+        "config": {
+          "type": "boolean",
+          "description": "true = nạp thêm /registry/apps/<name>/config/config-<env>.yaml. Bắt buộc khai rõ: ApplicationSet chạy với missingkey=error."
+        },
+        "environments": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["env"],
+            "properties": { "env": { "enum": ["dev", "prod"] } },
+            "additionalProperties": false
+          }
+        },
+        "requiredSecrets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "keys"],
+            "properties": {
+              "name": { "type": "string" },
+              "keys": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

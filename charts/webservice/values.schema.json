@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "webservice values",
+  "type": "object",
+  "required": ["replicaCount", "image", "containerPort", "probePath", "service", "app"],
+  "properties": {
+    "replicaCount": { "type": "integer", "minimum": 1 },
+    "image": {
+      "type": "object",
+      "required": ["repository", "tag"],
+      "properties": {
+        "repository": { "type": "string" },
+        "tag": { "type": "string", "not": { "const": "latest" } },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      },
+      "additionalProperties": false
+    },
+    "command": { "type": "array", "items": { "type": "string" } },
+    "args": { "type": "array", "items": { "type": "string" } },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": { "name": { "type": "string" } },
+        "additionalProperties": false
+      }
+    },
+    "containerPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "probePath": { "type": "string", "pattern": "^(/.*)?$" },
+    "service": {
+      "type": "object",
+      "required": ["port"],
+      "properties": { "port": { "type": "integer", "minimum": 1, "maximum": 65535 } },
+      "additionalProperties": false
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "host": { "type": "string" },
+        "path": { "type": "string" },
+        "className": { "type": "string" },
+        "annotations": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "app": {
+      "type": "object",
+      "properties": {
+        "secretName": { "type": "string" },
+        "fileSecrets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "mountPath"],
+            "properties": {
+              "name": { "type": "string" },
+              "key": { "type": "string" },
+              "mountPath": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "env": { "type": "array" },
+        "config": { "type": "string" },
+        "configFileName": { "type": "string" },
+        "configMountPath": { "type": "string" },
+        "configEnvVar": { "type": "string" },
+        "configMount": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "serviceMonitor": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "interval": { "type": "string" },
+        "path": { "type": "string" },
+        "port": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "env": {
+      "comment": "Không đặt required ở đây: thiếu trường nào là do template fail (hnq.env / hnq.nodeSelector / hnq.ingressAnnotations), thông báo ở đó nói rõ thiếu file nào.",
+      "type": "object",
+      "properties": {
+        "name": { "enum": ["dev", "prod"] },
+        "nodeSelector": { "type": "object" },
+        "clusterIssuer": { "type": "string" },
+        "domain": { "type": "string" },
+        "prune": { "type": "boolean" }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": { "type": "object" },
+        "limits": { "type": "object" }
+      }
+    },
+    "probes": { "type": "object" },
+    "persistence": { "type": "object" },
+    "backup": { "type": "object" },
+    "podSecurityContext": { "type": "object" },
+    "securityContext": { "type": "object" },
+    "podAnnotations": { "type": "object" },
+    "serviceAccount": { "type": "object" },
+    "tolerations": { "type": "array" }
+  }
+}

@@ -1,0 +1,14 @@
+{{- if .Values.app.config }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hnq.fullname" . }}-config
+  namespace: {{ include "hnq.namespace" . }}
+  labels:
+{{ include "hnq.labels" . | trim | indent 4 }}
+  annotations:
+{{ include "hnq.syncWave" (dict "kind" "ConfigMap") | trim | indent 4 }}
+data:
+  {{ .Values.app.configFileName }}: |
+{{ .Values.app.config | trim | indent 4 }}
+{{- end }}

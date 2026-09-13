@@ -1,0 +1,3 @@
+{{- if .Values.ingress.enabled }}
+{{ include "hnq.ingress" (dict "ctx" . "host" .Values.ingress.host "serviceName" (include "hnq.fullname" .) "servicePort" .Values.service.port "path" .Values.ingress.path) }}
+{{- end }}

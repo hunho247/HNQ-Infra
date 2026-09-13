@@ -1,0 +1,11 @@
+# CODEOWNERS ở đây KHÔNG phải để chặn — approvals đặt bằng 0 vì GitHub không
+# cho tự approve PR của mình (PLAN §13). Nó để **bắt dừng lại 10 giây** khi PR
+# đụng vào những chỗ mà sửa sai thì khách hàng thấy trước bạn.
+*                                   @hunho247
+
+registry/apps/*/values-prod.yaml    @hunho247
+env/prod.yaml                       @hunho247
+gitops/                             @hunho247
+charts/                             @hunho247
+secrets/prod/                       @hunho247
+ci/policy/                          @hunho247

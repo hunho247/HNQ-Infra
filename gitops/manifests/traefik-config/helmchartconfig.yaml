@@ -1,0 +1,36 @@
+# k3s ghi đè /var/lib/rancher/k3s/server/manifests/ mỗi lần khởi động, nên
+# cách duy nhất cấu hình Traefik gói sẵn là HelmChartConfig (PLAN §3).
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    service:
+      # D10 — không còn ServiceLB; mọi traffic vào qua Cloudflare Tunnel.
+      type: ClusterIP
+    deployment:
+      replicas: 2
+    nodeSelector:
+      hnq.dev/edge: "true"
+    affinity:
+      podAntiAffinity:
+        # required chứ không phải preferred: thà pod thứ hai Pending và thấy
+        # ngay, hơn là cả 2 replica âm thầm nằm chung một node.
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: traefik
+    providers:
+      kubernetesIngress:
+        publishedService:
+          enabled: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi

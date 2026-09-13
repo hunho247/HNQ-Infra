@@ -1,0 +1,20 @@
+# Wave -1: cấu hình lại Traefik gói sẵn của k3s (D10, PLAN §10).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: traefik-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/hunho247/HNQ-Infra.git
+    targetRevision: main
+    path: gitops/manifests/traefik-config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated: { selfHeal: true, prune: false }
+    syncOptions: [ServerSideApply=true]

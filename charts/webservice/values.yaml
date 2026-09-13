@@ -1,0 +1,71 @@
+# charts/webservice/values.yaml — mặc định cho MỌI service HTTP.
+# Thứ tự nạp: file này → /env/<env>.yaml → registry/apps/<svc>/values-<env>.yaml
+#             (+ /registry/apps/<svc>/config/config-<env>.yaml nếu spec.config: true)
+# Giá trị riêng của một service KHÔNG đặt ở đây.
+
+replicaCount: 1
+
+image:
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Tên Secret chứa docker registry credential. Khai ở values-<env>.yaml của service.
+imagePullSecrets: []
+
+# Ghi đè entrypoint của image. Để trống là dùng mặc định của image.
+command: []
+args: []
+
+containerPort: 8080
+# Đường kiểm tra sức khoẻ. hnq.probes fail template nếu rỗng.
+probePath: /health
+
+service:
+  port: 80
+
+ingress:
+  enabled: true
+  host: ""
+  path: /
+  className: traefik
+  annotations: {}
+
+app:
+  # Secret chính (envFrom). Tên phải khớp registry/apps/<svc>/service.yaml.
+  secretName: ""
+  # Secret phụ mount thành file, ví dụ firebase-credentials.json.
+  fileSecrets: []
+  #  - name: hnq-obgyn-clinic-service
+  #    key: firebase-credentials.json
+  #    mountPath: /app/credentials
+  env: []
+  # Nội dung file cấu hình — đến từ registry/apps/<svc>/config/config-<env>.yaml
+  config: ""
+  configFileName: config.yaml
+  configMountPath: /app/config
+  # Ứng dụng đọc cấu hình qua biến môi trường thay vì file: khai tên biến ở
+  # đây, ConfigMap vẫn là một (không có hai nguồn sự thật).
+  configEnvVar: ""
+  # Không mount ConfigMap thành file (chỉ dùng configEnvVar).
+  configMount: true
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  path: /metrics
+  port: http
+
+# resources / probes / env đến từ /env/<env>.yaml. Không đặt mặc định ở đây:
+# thiếu file env là lỗi phải thấy ngay, không phải lỗi âm thầm chạy bằng giá trị khác.
+resources: {}
+
+podSecurityContext: {}
+securityContext: {}
+podAnnotations: {}
+
+serviceAccount:
+  create: false
+  name: default
+
+tolerations: []

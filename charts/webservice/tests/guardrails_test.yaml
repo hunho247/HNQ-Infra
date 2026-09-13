@@ -1,0 +1,91 @@
+suite: webservice — những thứ KHÔNG được phép lọt qua
+templates:
+  - templates/deployment.yaml
+  - templates/ingress.yaml
+values:
+  - ../../../env/dev.yaml
+set:
+  image.repository: ghcr.io/hnq-tech/demo
+  image.tag: abc1234
+  ingress.host: demo-dev.l2cteam.work
+release:
+  name: demo
+tests:
+  - it: gắn nodeSelector từ env/<env>.yaml
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector["hnq.dev/env-dev"]
+          value: "true"
+
+  - it: mọi container có requests và limits
+    template: templates/deployment.yaml
+    asserts:
+      - isNotEmpty:
+          path: spec.template.spec.containers[0].resources.requests
+      - isNotEmpty:
+          path: spec.template.spec.containers[0].resources.limits
+
+  - it: fail template khi thiếu resources
+    template: templates/deployment.yaml
+    set:
+      resources: null
+    asserts:
+      - failedTemplate:
+          errorMessage: "hnq.resources: thiếu resources — nạp /env/<env>.yaml hoặc khai trong values"
+
+  - it: có readiness và liveness probe
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /health
+      - isNotEmpty:
+          path: spec.template.spec.containers[0].livenessProbe
+
+  - it: fail template khi thiếu probePath
+    template: templates/deployment.yaml
+    set:
+      probePath: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: "hnq.probes: thiếu probePath — mọi workload phải khai đường kiểm tra sức khoẻ"
+
+  - it: cấm tag latest — không quay lui được
+    template: templates/deployment.yaml
+    set:
+      image.tag: latest
+    asserts:
+      - failedTemplate: {}
+
+  - it: Deployment ở sync-wave 1, sau datastore
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "1"
+
+  - it: Ingress luôn có cluster-issuer và ở wave 2
+    template: templates/ingress.yaml
+    asserts:
+      - equal:
+          path: metadata.annotations["cert-manager.io/cluster-issuer"]
+          value: letsencrypt-dns01-dev
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "2"
+
+  - it: fail template khi env thiếu clusterIssuer
+    template: templates/ingress.yaml
+    set:
+      env.clusterIssuer: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: "hnq.ingressAnnotations: env.clusterIssuer rỗng — Ingress sẽ không có TLS"
+
+  - it: namespace suy ra từ tên service và env, không khai trong values
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: demo-dev

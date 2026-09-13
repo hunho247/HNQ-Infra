@@ -1,0 +1,70 @@
+# Wave 1: lưới an toàn lớp 2a (PLAN §9). File System Backup bằng kopia vì
+# local-path không có CSI snapshot (D17).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: velero
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: platform
+  source:
+    repoURL: https://vmware-tanzu.github.io/helm-charts
+    chart: velero
+    targetRevision: 8.2.0
+    helm:
+      values: |
+        credentials:
+          # SealedSecret ở secrets/prod/velero/r2.yaml
+          existingSecret: velero-r2
+        initContainers:
+          - name: velero-plugin-for-aws
+            image: velero/velero-plugin-for-aws:v1.11.1
+            volumeMounts:
+              - mountPath: /target
+                name: plugins
+        configuration:
+          uploaderType: kopia
+          # Backup hết, loại trừ bằng annotation — opt-out an toàn hơn opt-in.
+          defaultVolumesToFsBackup: true
+          volumeSnapshotLocation: []
+          backupStorageLocation:
+            - name: r2
+              provider: aws
+              bucket: hnq-velero
+              config:
+                region: auto
+                s3Url: https://CHANGEME.r2.cloudflarestorage.com
+                s3ForcePathStyle: "true"
+                # ⚠️ BẮT BUỘC với R2 — thiếu dòng này là backup lỗi.
+                checksumAlgorithm: ""
+        deployNodeAgent: true
+        nodeAgent:
+          # node-agent phải ở nơi có PV, tức 2 máy nhà.
+          nodeSelector:
+            hnq.dev/storage: "true"
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 1000m, memory: 1Gi }
+        nodeSelector:
+          hnq.dev/role: control-plane
+        tolerations:
+          - key: hnq.dev/dedicated
+            operator: Equal
+            value: control-plane
+            effect: NoSchedule
+        schedules:
+          prod-daily:
+            schedule: "0 2 * * *"
+            template:
+              ttl: 720h
+              includedNamespaces:
+                - "*-prod"
+        # Dev không có schedule — dựng lại từ Git.
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: velero
+  syncPolicy:
+    automated: { selfHeal: true, prune: false }
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]

@@ -1,0 +1,80 @@
+# Wave 1: giám sát đặt ở hnq-03 (PLAN §12) — ở master thì mất master là mất
+# luôn khả năng biết; ở node prod thì node prod chết là mất monitoring đúng
+# lúc cần nó nhất.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: platform
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 67.5.0
+    helm:
+      skipCrds: false
+      values: |
+        defaultRules:
+          # 8 alert là TRẦN, không phải mục tiêu (PLAN §12). Rule mặc định của
+          # chart bị tắt hết; rule của mình nằm ở gitops/manifests/monitoring.
+          create: false
+        alertmanager:
+          alertmanagerSpec:
+            nodeSelector:
+              hnq.dev/env-dev: "true"
+            storage:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: hnq-local
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 2Gi
+        prometheus:
+          prometheusSpec:
+            nodeSelector:
+              hnq.dev/env-dev: "true"
+            retention: 15d
+            # Nhận ServiceMonitor ở mọi namespace, không chỉ namespace của chart.
+            serviceMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: hnq-local
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 20Gi
+            resources:
+              requests: { cpu: 100m, memory: 512Mi }
+              limits: { cpu: 1000m, memory: 2Gi }
+        grafana:
+          nodeSelector:
+            hnq.dev/env-dev: "true"
+          persistence:
+            enabled: true
+            storageClassName: hnq-local
+            size: 2Gi
+          # Không Ingress: vào bằng port-forward qua tailnet, giống ArgoCD.
+          ingress:
+            enabled: false
+        prometheus-node-exporter:
+          # DaemonSet phải chạy cả trên master mới thấy đĩa của master.
+          tolerations:
+            - key: hnq.dev/dedicated
+              operator: Equal
+              value: control-plane
+              effect: NoSchedule
+        kube-state-metrics:
+          nodeSelector:
+            hnq.dev/env-dev: "true"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: { selfHeal: true, prune: false }
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]

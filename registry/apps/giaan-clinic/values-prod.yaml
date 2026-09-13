@@ -1,0 +1,27 @@
+# giaan-clinic — prod. Chỉ ghi phần KHÁC mặc định.
+image:
+  repository: registry.gitlab.com/hnq-tech/clients/lotus-clinic/lotus-backend
+  tag: "f1eb557d"
+
+imagePullSecrets:
+  - name: giaan-clinic-registry
+
+containerPort: 1001
+probePath: /health
+
+ingress:
+  host: client-giaan-clinic.l2cteam.work
+
+app:
+  secretName: giaan-clinic-backend
+  # App đọc cấu hình qua biến môi trường, không mount thành file.
+  configEnvVar: APP_CONFIG_YAML
+  configMount: false
+  fileSecrets:
+    - name: giaan-clinic-keystore
+      mountPath: /app/app/keystore
+    - name: hnq-obgyn-clinic-service
+      mountPath: /app/app/credentials
+  env:
+    - name: APP_ENV
+      value: "prod"

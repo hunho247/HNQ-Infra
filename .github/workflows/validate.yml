@@ -1,0 +1,111 @@
+name: validate
+
+# Đây là cửa duyệt DUY NHẤT (PLAN §13): branch protection đặt approvals = 0 vì
+# GitHub không cho tự approve PR của mình, nên status check phải đủ chặt.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  HELM_VERSION: v3.16.4
+  KUBECONFORM_VERSION: v0.6.7
+  CONFTEST_VERSION: 0.56.0
+  YQ_VERSION: v4.44.5
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks cần lịch sử để quét cả commit trong PR.
+          fetch-depth: 0
+
+      - name: Cài công cụ
+        run: |
+          set -euo pipefail
+          curl -sfL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" | tar xz -C /tmp
+          sudo mv /tmp/linux-amd64/helm /usr/local/bin/
+          helm plugin install https://github.com/helm-unittest/helm-unittest --version v0.7.2
+          KC_URL="https://github.com/yannh/kubeconform/releases/download"
+          curl -sfL "$KC_URL/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar xz -C /tmp
+          sudo mv /tmp/kubeconform /usr/local/bin/
+          CT_URL="https://github.com/open-policy-agent/conftest/releases/download"
+          curl -sfL "$CT_URL/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz" | tar xz -C /tmp
+          sudo mv /tmp/conftest /usr/local/bin/
+          sudo curl -sfL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64" \
+            -o /usr/local/bin/yq
+          sudo chmod +x /usr/local/bin/yq
+          pipx install yamllint
+          pip install jsonschema pyyaml
+
+      # 1. YAML có đọc được không
+      - name: yamllint
+        run: yamllint -c .yamllint.yaml .
+
+      # 2. service.yaml có đúng hình dạng không
+      - name: JSON Schema — registry/apps/*/service.yaml
+        run: ci/scripts/check-schema.sh
+
+      # 3. Chart có tự mâu thuẫn không
+      - name: helm lint + helm unittest
+        run: |
+          set -euo pipefail
+          for c in charts/webservice charts/datastore; do
+            helm dependency build "$c" || helm dependency update "$c"
+          done
+          helm lint charts/webservice -f env/dev.yaml \
+            --set image.repository=x --set image.tag=abc1234 --set ingress.host=x.example.com
+          helm lint charts/datastore -f env/dev.yaml \
+            --set image.repository=x --set image.tag=abc1234 --set backup.command=x
+          helm unittest charts/webservice charts/datastore
+
+      # 4. Secret khai trong registry có file thật không
+      - name: check-secrets
+        run: ci/scripts/check-secrets.sh
+
+      # 5. Mọi service × mọi env render được không
+      - name: render-all
+        run: ci/scripts/render-all.sh
+
+      # 6. Manifest render ra có hợp lệ với API server không
+      - name: kubeconform
+        run: |
+          # CRD của cert-manager, Prometheus Operator... không có trong schema
+          # mặc định — lấy từ CRDs-catalog.
+          CRD_SCHEMAS='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main'
+          CRD_SCHEMAS="$CRD_SCHEMAS/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json"
+          kubeconform -strict -summary \
+            -schema-location default \
+            -schema-location "$CRD_SCHEMAS" \
+            .render/*.yaml .render/platform/*.yaml
+
+      # 7. Có phạm luật nào ở PLAN §13 không
+      - name: conftest
+        run: |
+          set -euo pipefail
+          conftest test --policy ci/policy .render/*.yaml .render/platform/*.yaml
+          conftest test --policy ci/policy --namespace gitops \
+            gitops/root.yaml gitops/bootstrap/*.yaml gitops/bootstrap/platform/*.yaml
+
+      # 8. Có secret nào lọt vào Git không
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 9. Image đang dùng có CVE nghiêm trọng nào không
+      - name: trivy — image trong registry/apps
+        run: |
+          set -euo pipefail
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin v0.58.1
+          # Quét image của chart bên thứ ba; image của mình do CI của repo
+          # ứng dụng quét lúc build.
+          for img in $(yq -r '.image.repository + ":" + .image.tag' registry/apps/storage-*/values-dev.yaml); do
+            trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 --no-progress "$img"
+          done

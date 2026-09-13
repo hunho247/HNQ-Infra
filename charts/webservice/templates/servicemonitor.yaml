@@ -1,0 +1,22 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "hnq.fullname" . }}
+  namespace: {{ include "hnq.namespace" . }}
+  labels:
+{{ include "hnq.labels" . | trim | indent 4 }}
+  annotations:
+{{ include "hnq.syncWave" (dict "kind" "ServiceMonitor") | trim | indent 4 }}
+spec:
+  selector:
+    matchLabels:
+{{ include "hnq.selectorLabels" . | trim | indent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ include "hnq.namespace" . }}
+  endpoints:
+    - port: {{ .Values.serviceMonitor.port }}
+      path: {{ .Values.serviceMonitor.path }}
+      interval: {{ .Values.serviceMonitor.interval }}
+{{- end }}

@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "datastore values",
+  "type": "object",
+  "required": ["image", "port", "portName", "persistence"],
+  "properties": {
+    "image": {
+      "type": "object",
+      "required": ["repository", "tag"],
+      "properties": {
+        "repository": { "type": "string" },
+        "tag": { "type": "string", "not": { "const": "latest" } },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      },
+      "additionalProperties": false
+    },
+    "imagePullSecrets": { "type": "array" },
+    "command": { "type": "array", "items": { "type": "string" } },
+    "args": { "type": "array", "items": { "type": "string" } },
+    "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "portName": { "type": "string", "maxLength": 15 },
+    "secretName": { "type": "string" },
+    "extraPorts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "port"],
+        "properties": {
+          "name": { "type": "string", "maxLength": 15 },
+          "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "extraEnv": { "type": "array" },
+    "persistence": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "storageClass": { "const": "hnq-local" },
+        "size": { "type": "string" },
+        "mountPath": { "type": "string" },
+        "subPath": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "backup": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "schedule": { "type": "string" },
+        "retentionHours": { "type": "integer", "minimum": 1 },
+        "command": { "type": "string" },
+        "fileSuffix": { "type": "string" },
+        "image": { "type": "object" },
+        "pvcSize": { "type": "string" },
+        "rclone": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "serviceMonitor": { "type": "object" },
+    "exporter": { "type": "object" },
+    "env": {
+      "comment": "Không đặt required ở đây: thiếu trường nào là do template fail (hnq.env / hnq.nodeSelector / hnq.ingressAnnotations), thông báo ở đó nói rõ thiếu file nào.",
+      "type": "object",
+      "properties": {
+        "name": { "enum": ["dev", "prod"] },
+        "nodeSelector": { "type": "object" },
+        "clusterIssuer": { "type": "string" },
+        "domain": { "type": "string" },
+        "prune": { "type": "boolean" }
+      }
+    },
+    "resources": { "type": "object" },
+    "probes": { "type": "object" },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "host", "port"],
+            "properties": {
+              "name": { "type": "string" },
+              "host": { "type": "string" },
+              "port": { "type": "integer" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "className": { "type": "string" },
+        "annotations": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "podSecurityContext": { "type": "object" },
+    "securityContext": { "type": "object" },
+    "podAnnotations": { "type": "object" },
+    "tolerations": { "type": "array" }
+  }
+}

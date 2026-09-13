@@ -1,0 +1,21 @@
+# storage-opensearch — dev
+# Chỉ ghi phần KHÁC mặc định của charts/datastore/values.yaml và /env/dev.yaml.
+image:
+  repository: docker.io/opensearchproject/opensearch
+  tag: "2.19.4"
+
+port: 9200
+portName: opensearch
+secretName: storage-opensearch-credentials
+
+persistence:
+  size: 20Gi
+  mountPath: /usr/share/opensearch/data
+
+extraEnv:
+  - name: discovery.type
+    value: single-node
+  - name: bootstrap.memory_lock
+    value: "true"
+  - name: OPENSEARCH_JAVA_OPTS
+    value: "-Xms512m -Xmx512m"

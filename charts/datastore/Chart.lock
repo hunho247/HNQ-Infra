@@ -1,0 +1,6 @@
+dependencies:
+- name: hnq-common
+  repository: file://../hnq-common
+  version: 0.1.0
+digest: sha256:cfeedd291202b51b0a8362ca9575b08fbc2f7d6db469b762c7b94682f01edbaf
+generated: "2026-09-13T15:56:58.230644011Z"

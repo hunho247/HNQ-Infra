@@ -1,0 +1,41 @@
+# gitops/root.yaml — FILE DUY NHẤT apply bằng tay, đúng một lần trong đời
+# cluster (PLAN §7):
+#
+#   kubectl -n argocd apply -f gitops/root.yaml
+#
+# Nó trỏ vào gitops/bootstrap/ — nơi có 2 AppProject, 1 ApplicationSet và các
+# Application của chart bên thứ ba. Từ đó mọi thứ còn lại tự dựng.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  # Không cho ArgoCD xoá chính nó khi root bị xoá nhầm.
+  finalizers: []
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hunho247/HNQ-Infra.git
+    targetRevision: main
+    path: gitops/bootstrap
+    directory:
+      recurse: true
+      include: '{*.yaml,platform/*.yaml}'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      selfHeal: true
+      # prune: false ở root — generator hỏng hay file bị xoá nhầm không được
+      # phép kéo theo cả cụm Application (D15).
+      prune: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m

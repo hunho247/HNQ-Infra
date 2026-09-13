@@ -1,0 +1,88 @@
+# ApplicationSet sinh Application cho MỌI service trong registry/apps/
+# (D3, D15). Thêm service = thêm thư mục, không sửa file này.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  syncPolicy:
+    # create-update: generator hỏng KHÔNG thể xoá hàng loạt Application.
+    # Xoá một service là thao tác tay có chủ ý (D15).
+    applicationsSync: create-update
+    preserveResourcesOnDeletion: true
+  generators:
+    - matrix:
+        generators:
+          - git:
+              repoURL: &repo https://github.com/hunho247/HNQ-Infra.git
+              revision: main
+              files:
+                - path: "registry/apps/*/service.yaml"
+          - list:
+              # elements: [] phải đứng TRƯỚC elementsYaml — workaround đã biết
+              # của tổ hợp matrix + git file generator. Bỏ đi thì generator im
+              # lặng không sinh gì (PLAN §7).
+              elements: []
+              elementsYaml: "{{ .spec.environments | toJson }}"
+  template:
+    metadata:
+      name: "{{ .metadata.name }}-{{ .env }}"
+      labels:
+        hnq.dev/service: "{{ .metadata.name }}"
+        hnq.dev/env: "{{ .env }}"
+    spec:
+      project: "{{ .spec.category }}"
+      source:
+        repoURL: *repo
+        targetRevision: main
+        path: "charts/{{ .spec.chart }}"
+        helm:
+          releaseName: "{{ .metadata.name }}"
+          valueFiles:
+            # "/" = tính từ gốc repo. Thứ tự là thứ tự ưu tiên tăng dần.
+            - values.yaml
+            - "/env/{{ .env }}.yaml"
+            - "/registry/apps/{{ .metadata.name }}/values-{{ .env }}.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{ .metadata.name }}-{{ .env }}"
+      syncPolicy:
+        automated:
+          selfHeal: true
+          # Mặc định an toàn; dev được bật prune trong templatePatch bên dưới.
+          # Không viết {{ if }} thẳng ở đây: template của ApplicationSet phải
+          # là YAML hợp lệ TRƯỚC khi render, còn templatePatch thì render
+          # trước rồi mới parse.
+          prune: false
+        syncOptions:
+          - CreateNamespace=true
+          - PruneLast=true
+          - ServerSideApply=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 5m
+  # templatePatch là chỗ duy nhất đặt được if/else: nội dung của nó được render
+  # thành text rồi mới parse thành YAML. Hai việc cần nó:
+  #   1. service khai config: true thì nạp thêm một values file
+  #   2. dev prune: true, prod prune: false (D4)
+  templatePatch: |
+    spec:
+      source:
+        helm:
+          valueFiles:
+            - values.yaml
+            - "/env/{{ .env }}.yaml"
+            - "/registry/apps/{{ .metadata.name }}/values-{{ .env }}.yaml"
+            {{- if .spec.config }}
+            - "/registry/apps/{{ .metadata.name }}/config/config-{{ .env }}.yaml"
+            {{- end }}
+      syncPolicy:
+        automated:
+          selfHeal: true
+          prune: {{ if eq .env "dev" }}true{{ else }}false{{ end }}

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: hnq-common
+description: Library chart dùng chung — labels, nodeSelector, probes, resources, ingress, sync-wave
+type: library
+version: 0.1.0

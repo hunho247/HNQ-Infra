@@ -1,0 +1,106 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hnq.fullname" . }}
+  namespace: {{ include "hnq.namespace" . }}
+  labels:
+{{ include "hnq.labels" . | trim | indent 4 }}
+  annotations:
+{{ include "hnq.syncWave" (dict "kind" "Deployment" "chart" "webservice") | trim | indent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+{{ include "hnq.selectorLabels" . | trim | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ include "hnq.labels" . | trim | indent 8 }}
+      {{- if or .Values.app.config .Values.podAnnotations }}
+      annotations:
+        {{- if .Values.app.config }}
+        checksum/config: {{ .Values.app.config | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+{{ toYaml . | trim | indent 8 }}
+        {{- end }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name | default "default" }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml . | trim | indent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+{{ toYaml . | trim | indent 8 }}
+      {{- end }}
+{{ include "hnq.nodeSelector" . | trim | indent 6 }}
+{{- with (include "hnq.tolerations" .) }}{{ . | nindent 6 }}{{- end }}
+      containers:
+        - name: {{ include "hnq.name" . }}
+          image: {{ include "hnq.image" (dict "ctx" . "image" .Values.image) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          {{- with .Values.command }}
+          command:
+{{ toYaml . | trim | indent 12 }}
+          {{- end }}
+          {{- with .Values.args }}
+          args:
+{{ toYaml . | trim | indent 12 }}
+          {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext:
+{{ toYaml . | trim | indent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.containerPort }}
+              protocol: TCP
+          {{- if or .Values.app.env (and .Values.app.config .Values.app.configEnvVar) }}
+          env:
+            {{- with .Values.app.env }}
+{{ toYaml . | trim | indent 12 }}
+            {{- end }}
+            {{- if and .Values.app.config .Values.app.configEnvVar }}
+            - name: {{ .Values.app.configEnvVar }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "hnq.fullname" . }}-config
+                  key: {{ .Values.app.configFileName }}
+            {{- end }}
+          {{- end }}
+          {{- if .Values.app.secretName }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.app.secretName }}
+          {{- end }}
+{{ include "hnq.probes" (dict "ctx" . "path" .Values.probePath "port" "http") | trim | indent 10 }}
+{{ include "hnq.resources" (dict "ctx" . "resources" .Values.resources) | trim | indent 10 }}
+          {{- $mountConfig := and .Values.app.config .Values.app.configMount }}
+          {{- if or $mountConfig .Values.app.fileSecrets }}
+          volumeMounts:
+            {{- if $mountConfig }}
+            - name: config
+              mountPath: {{ .Values.app.configMountPath }}
+              readOnly: true
+            {{- end }}
+            {{- range .Values.app.fileSecrets }}
+            - name: secret-{{ .name }}
+              mountPath: {{ .mountPath }}
+              readOnly: true
+            {{- end }}
+          {{- end }}
+      {{- if or $mountConfig .Values.app.fileSecrets }}
+      volumes:
+        {{- if $mountConfig }}
+        - name: config
+          configMap:
+            name: {{ include "hnq.fullname" . }}-config
+        {{- end }}
+        {{- range .Values.app.fileSecrets }}
+        - name: secret-{{ .name }}
+          secret:
+            secretName: {{ .name }}
+        {{- end }}
+      {{- end }}

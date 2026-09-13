@@ -1,0 +1,32 @@
+suite: webservice — quên nạp /env/<env>.yaml thì fail ngay, không render ra thứ sai
+# Suite này CỐ Ý không nạp env/<env>.yaml: đây đúng là lỗi hay gặp nhất khi
+# sửa ApplicationSet — valueFiles thiếu một dòng. Fail lúc render rẻ hơn nhiều
+# so với một pod prod chạy trên node dev.
+templates:
+  - templates/deployment.yaml
+set:
+  image.repository: ghcr.io/hnq-tech/demo
+  image.tag: abc1234
+release:
+  name: demo
+tests:
+  - it: thiếu env.name thì fail
+    asserts:
+      - failedTemplate:
+          errorMessage: "hnq.env: env.name rỗng — Application phải nạp /env/<env>.yaml"
+
+  - it: có env.name nhưng thiếu nodeSelector thì vẫn fail
+    set:
+      env.name: dev
+    asserts:
+      - failedTemplate:
+          errorMessage: "hnq.nodeSelector: env.nodeSelector rỗng — thiếu /env/<env>.yaml trong valueFiles"
+
+  - it: có nodeSelector nhưng thiếu resources thì vẫn fail
+    set:
+      env.name: dev
+      env.nodeSelector:
+        hnq.dev/env-dev: "true"
+    asserts:
+      - failedTemplate:
+          errorMessage: "hnq.resources: thiếu resources — nạp /env/<env>.yaml hoặc khai trong values"

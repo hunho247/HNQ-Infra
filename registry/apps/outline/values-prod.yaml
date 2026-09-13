@@ -1,0 +1,144 @@
+# outline — prod. Chỉ ghi phần KHÁC mặc định.
+# Lưu trữ file đi thẳng vào MinIO (FILE_STORAGE=s3) nên không cần PVC:
+# webservice là chart không trạng thái, dữ liệu nằm ở storage-minio và
+# storage-postgres — hai chỗ đã có dump hằng giờ và Velero.
+image:
+  repository: docker.io/outlinewiki/outline
+  tag: 1.1.0
+containerPort: 3000
+probePath: /_health
+ingress:
+  host: admin-workspace.l2cteam.work
+app:
+  env:
+  - name: PORT
+    value: '3000'
+  - name: URL
+    value: https://admin-workspace.l2cteam.work
+  - name: FORCE_HTTPS
+    value: 'false'
+  - name: FILE_STORAGE
+    value: s3
+  - name: FILE_STORAGE_LOCAL_ROOT_DIR
+    value: /var/lib/outline/data
+  - name: FILE_STORAGE_LOCAL_UPLOAD_DIR
+    value: /var/lib/outline/data/uploads
+  - name: AWS_ACCESS_KEY_ID
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: s3AccessKeyId
+  - name: AWS_SECRET_ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: s3SecretAccessKey
+  - name: AWS_REGION
+    value: us-east-1
+  - name: AWS_S3_UPLOAD_BUCKET_NAME
+    value: admin-workspace-outline-s3
+  - name: AWS_S3_UPLOAD_BUCKET_URL
+    value: https://storage-minio-api.l2cteam.work
+  - name: AWS_S3_FORCE_PATH_STYLE
+    value: 'true'
+  - name: AWS_S3_ACL
+    value: private
+  - name: SERVICES
+    value: collaboration,websockets,web,worker
+  - name: WEB_CONCURRENCY
+    value: '1'
+  - name: SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: SECRET_KEY
+  - name: UTILS_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: UTILS_SECRET
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: DATABASE_URL
+  - name: PGSSLMODE
+    value: disable
+  - name: REDIS_URL
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: REDIS_URL
+  - name: REDIS_COLLABORATION_URL
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: REDIS_COLLABORATION_URL
+  - name: SMTP_HOST
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: SMTP_HOST
+        optional: true
+  - name: SMTP_PORT
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: SMTP_PORT
+        optional: true
+  - name: SMTP_USERNAME
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: SMTP_USERNAME
+        optional: true
+  - name: SMTP_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: SMTP_PASSWORD
+        optional: true
+  - name: SMTP_FROM_EMAIL
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: SMTP_FROM_EMAIL
+        optional: true
+  - name: SMTP_REPLY_EMAIL
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: SMTP_REPLY_EMAIL
+        optional: true
+  - name: SMTP_SECURE
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: SMTP_SECURE
+        optional: true
+  - name: DISCORD_CLIENT_ID
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: DISCORD_CLIENT_ID
+        optional: true
+  - name: DISCORD_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: DISCORD_CLIENT_SECRET
+        optional: true
+  - name: DISCORD_SERVER_ID
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: DISCORD_SERVER_ID
+        optional: true
+  - name: DISCORD_SERVER_ROLES
+    valueFrom:
+      secretKeyRef:
+        name: outline-secrets
+        key: DISCORD_SERVER_ROLES
+        optional: true
+serviceMonitor:
+  enabled: false

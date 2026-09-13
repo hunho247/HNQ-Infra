@@ -1,0 +1,51 @@
+# env/prod.yaml — khác biệt của môi trường prod. Xem chú thích ở env/dev.yaml.
+env:
+  name: prod
+  # Nhãn node của hnq-02 (PLAN §2).
+  nodeSelector:
+    hnq.dev/env-prod: "true"
+  clusterIssuer: letsencrypt-dns01-prod
+  domain: l2cteam.work
+  # Prod prune=false (D8) — xoá tài nguyên prod là thao tác tay có chủ ý.
+  prune: false
+
+image:
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 2000m
+    memory: 1Gi
+
+probes:
+  readiness:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    failureThreshold: 3
+  liveness:
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    failureThreshold: 3
+
+persistence:
+  storageClass: hnq-local
+  size: 20Gi
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+
+backup:
+  # Dump hằng giờ lên PVC dump rồi rclone lên R2 (PLAN §9, lớp 2b).
+  enabled: true
+  schedule: "0 * * * *"
+  retentionHours: 72

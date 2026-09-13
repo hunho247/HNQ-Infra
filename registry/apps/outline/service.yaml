@@ -1,0 +1,24 @@
+apiVersion: hnq.dev/v1
+kind: ServiceRelease
+metadata:
+  name: outline
+spec:
+  category: app
+  chart: webservice
+  # Không có file cấu hình riêng (registry/README.md)
+  config: false
+  environments:
+    # prod bật ở P6 (PLAN §16, cửa chặn 2).
+    - env: dev
+  requiredSecrets:
+    - name: outline-secrets
+      keys:
+        [
+          SECRET_KEY,
+          UTILS_SECRET,
+          DATABASE_URL,
+          REDIS_URL,
+          REDIS_COLLABORATION_URL,
+          s3AccessKeyId,
+          s3SecretAccessKey,
+        ]
