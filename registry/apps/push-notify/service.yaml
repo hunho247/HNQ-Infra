@@ -1,0 +1,17 @@
+apiVersion: hnq.dev/v1
+kind: ServiceRelease
+metadata:
+  name: push-notify
+spec:
+  category: app
+  chart: webservice
+  # Nạp thêm /registry/apps/push-notify/config/config-<env>.yaml
+  config: true
+  environments:
+    # prod bật ở P6, sau khi P5 xong (PLAN §16, cửa chặn 2).
+    - env: dev
+  requiredSecrets:
+    - name: push-notify-config
+      keys: [DB_USER, DB_PASS]
+    - name: push-notify-registry
+      keys: [.dockerconfigjson]

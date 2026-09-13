@@ -1,0 +1,46 @@
+# Cấu hình ứng dụng của push-notify (prod) — VALUES FILE, nội dung nằm dưới
+# app.config (xem registry/README.md).
+# database.user và database.pass KHÔNG nằm ở đây: initContainer trộn chúng vào
+# từ Secret push-notify-config lúc pod khởi động.
+app:
+  config: |
+    debug: true
+    server:
+      address: ":10080"
+    context:
+      timeout: 2
+    database:
+      host: "mariadb_prod"
+      port: "3306"
+      name: "giaan_prod"
+      logLevel: "silent"
+    gorush:
+      address: "gorush.gorush-prod.svc.cluster.local"
+      port: "10088"
+    logging:
+      config:
+        level: debug
+        disableCaller: false
+        encoding: "json"
+        outputPaths:
+          - "stdout"
+        errorOutputPaths:
+          - "stderr"
+        encoderConfig:
+          timeKey: "ts"
+          levelKey: "level"
+          nameKey: "logger"
+          callerKey: "caller"
+          functionKey: ""
+          messageKey: "msg"
+          stacktraceKey: "stacktrace"
+          lineEnding: "\n"
+          levelEncoder: "capital"
+          timeEncoder: "ISO8601"
+          durationEncoder: "s"
+          callerEncoder: "short"
+      logPath: "/var/log/giaan/l2c_notify_service.log"
+      rotate:
+        maxSize: 1
+        maxBackups: 2
+        maxAge: 30

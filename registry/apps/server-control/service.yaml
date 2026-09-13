@@ -1,0 +1,15 @@
+apiVersion: hnq.dev/v1
+kind: ServiceRelease
+metadata:
+  name: server-control
+spec:
+  category: app
+  chart: webservice
+  config: false
+  environments:
+    - env: dev
+  requiredSecrets:
+    - name: server-control-credentials
+      keys: [ADMIN_PASSWORD, SESSION_SECRET]
+    - name: server-control-registry
+      keys: [.dockerconfigjson]

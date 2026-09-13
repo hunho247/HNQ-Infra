@@ -1,0 +1,38 @@
+# storage-minio — prod
+# Chỉ ghi phần KHÁC mặc định của charts/datastore/values.yaml và /env/prod.yaml.
+image:
+  repository: docker.io/minio/minio
+  tag: "RELEASE.2025-04-22T22-12-26Z"
+
+port: 9000
+portName: minio
+secretName: storage-minio-credentials
+
+persistence:
+  size: 50Gi
+  mountPath: /data
+
+extraPorts:
+  - name: console
+    port: 9001
+
+# Ngoại lệ có chủ ý của chart datastore: client tải file bằng URL ký sẵn nên
+# host API phải ra được internet. Console thì không — vào bằng port-forward.
+ingress:
+  enabled: true
+  hosts:
+    - name: api
+      host: storage-minio-api.l2cteam.work
+      port: 9000
+
+command: ["minio"]
+args: ["server", "/data", "--console-address", ":9001"]
+
+# Console 9001 không có Ingress: console quản trị không cần ra internet.
+#   kubectl -n storage-minio-prod port-forward sts/storage-minio 9001
+
+backup:
+  # Không dump logic được bằng một lệnh: dữ liệu nằm trong file trên PV.
+  # Đường lùi là Velero File System Backup hằng ngày (PLAN §9, lớp 2a),
+  # mất tối đa 24 giờ thay vì 1 giờ — chấp nhận vì đây là dữ liệu dựng lại được.
+  enabled: false

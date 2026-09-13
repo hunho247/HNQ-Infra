@@ -1,0 +1,10 @@
+apiVersion: v2
+name: datastore
+description: Chart chung cho database một node + CronJob dump lên R2
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+dependencies:
+  - name: hnq-common
+    version: 0.1.0
+    repository: file://../hnq-common

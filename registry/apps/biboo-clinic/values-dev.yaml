@@ -1,0 +1,27 @@
+# biboo-clinic — dev. Chỉ ghi phần KHÁC mặc định.
+image:
+  repository: registry.gitlab.com/hnq-tech/clients/lotus-clinic/lotus-backend
+  tag: "6aebe241"
+
+imagePullSecrets:
+  - name: biboo-clinic-registry
+
+containerPort: 1001
+probePath: /health
+
+ingress:
+  host: client-biboo-clinic-dev.l2cteam.work
+
+app:
+  secretName: biboo-clinic-backend
+  # App đọc cấu hình qua biến môi trường, không mount thành file.
+  configEnvVar: APP_CONFIG_YAML
+  configMount: false
+  fileSecrets:
+    - name: biboo-clinic-keystore
+      mountPath: /app/app/keystore
+    - name: hnq-obgyn-clinic-service
+      mountPath: /app/app/credentials
+  env:
+    - name: APP_ENV
+      value: "dev"

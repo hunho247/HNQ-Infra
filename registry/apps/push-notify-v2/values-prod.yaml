@@ -1,0 +1,53 @@
+# push-notify-v2 (API) — prod. Chỉ ghi phần KHÁC mặc định.
+image:
+  repository: registry.gitlab.com/hnq-tech/hnq-platform/push-notify
+  tag: "2f712b9c"
+
+imagePullSecrets:
+  - name: push-notify-v2-registry
+
+containerPort: 10080
+probePath: /healthz
+
+args: ["--config", "/app/configs/config.yaml"]
+
+app:
+  secretName: push-notify-v2-config
+  configMountPath: /app/configs
+  # App đọc cấu hình từ file; mật khẩu trộn vào trong initContainer.
+  configInject:
+    fields:
+      - path: .database.host
+        key: DB_HOST
+      - path: .database.port
+        key: DB_PORT
+      - path: .database.name
+        key: DB_NAME
+      - path: .database.user
+        key: DB_USER
+      - path: .database.pass
+        key: DB_PASS
+      - path: .internal_api_key
+        key: INTERNAL_API_KEY
+  fileSecrets:
+    - name: push-notify-v2-firebase
+      mountPath: /app/firebase/service-account.json
+      subPath: service-account.json
+  env:
+    - name: APP_ENV
+      value: "prod"
+    - name: APP_CONFIG_FILE
+      value: "/app/configs/config.yaml"
+    - name: PUSH_FIREBASE_SERVICE_ACCOUNT_PATH
+      value: "/app/firebase/service-account.json"
+    - name: TZ
+      value: "Asia/Ho_Chi_Minh"
+
+service:
+  port: 10080
+
+ingress:
+  enabled: false
+
+serviceMonitor:
+  enabled: false

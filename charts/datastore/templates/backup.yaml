@@ -1,0 +1,134 @@
+{{- if .Values.backup.enabled }}
+{{- if not .Values.backup.command }}
+{{- fail "datastore: backup.enabled=true nhưng thiếu backup.command — không biết dump bằng lệnh gì" }}
+{{- end }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  # PVC riêng cho dump: dump nằm cùng node với database (/srv/k3s/dump) rồi
+  # rclone đẩy lên R2. Lớp 2b của PLAN §9 — mất tối đa 1 giờ.
+  name: {{ include "hnq.fullname" . }}-dump
+  namespace: {{ include "hnq.namespace" . }}
+  labels:
+{{ include "hnq.labels" . | trim | indent 4 }}
+  annotations:
+{{ include "hnq.syncWave" (dict "kind" "PersistentVolumeClaim") | trim | indent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ include "hnq.storageClass" . }}
+  resources:
+    requests:
+      storage: {{ .Values.backup.pvcSize }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "hnq.fullname" . }}-dump
+  namespace: {{ include "hnq.namespace" . }}
+  labels:
+{{ include "hnq.labels" . | trim | indent 4 }}
+  annotations:
+{{ include "hnq.syncWave" (dict "kind" "CronJob" "chart" "datastore") | trim | indent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+{{ include "hnq.labels" . | trim | indent 12 }}
+        spec:
+          restartPolicy: OnFailure
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+{{ toYaml . | trim | indent 12 }}
+          {{- end }}
+{{ include "hnq.nodeSelector" . | trim | indent 10 }}
+          # Thứ tự: initContainer dump xong mới tới container upload.
+          # Đây là cơ chế có sẵn của Kubernetes, không cần vòng chờ tự viết.
+          initContainers:
+            - name: dump
+              image: {{ include "hnq.image" (dict "ctx" . "image" (ternary .Values.image .Values.backup.image (empty .Values.backup.image.repository))) | quote }}
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+                  export DUMP_FILE="/dump/{{ include "hnq.name" . }}-${STAMP}.{{ .Values.backup.fileSuffix }}"
+                  {{ .Values.backup.command | nindent 18 | trim }}
+                  test -s "$DUMP_FILE"
+                  # Dọn bản cũ hơn retentionHours để PVC dump không lấp đầy đĩa node.
+                  find /dump -name '{{ include "hnq.name" . }}-*' -type f \
+                    -mmin +{{ mul .Values.backup.retentionHours 60 }} -delete
+              {{- if .Values.secretName }}
+              envFrom:
+                - secretRef:
+                    name: {{ .Values.secretName }}
+              {{- end }}
+              volumeMounts:
+                - name: dump
+                  mountPath: /dump
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+          containers:
+            {{- if .Values.backup.rclone.enabled }}
+            - name: upload
+              image: {{ include "hnq.image" (dict "ctx" . "image" .Values.backup.rclone.image) | quote }}
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  rclone copy /dump {{ .Values.backup.rclone.remote }}/{{ include "hnq.env" . }}/{{ include "hnq.name" . }} \
+                    --max-age 90m --include '*.{{ .Values.backup.fileSuffix }}'
+              env:
+                - name: RCLONE_CONFIG
+                  value: /config/rclone.conf
+              volumeMounts:
+                - name: dump
+                  mountPath: /dump
+                - name: rclone-config
+                  mountPath: /config
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 256Mi
+            {{- else }}
+            - name: noop
+              # Không đẩy lên R2: dump chỉ nằm trên đĩa node. Velero vẫn backup
+              # PVC dump, nhưng mất node là mất bản trong ngày — chỉ chấp nhận
+              # được ở dev.
+              image: {{ include "hnq.image" (dict "ctx" . "image" .Values.backup.rclone.image) | quote }}
+              command: ["/bin/sh", "-c", "echo dump xong, rclone tắt"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 50m
+                  memory: 64Mi
+            {{- end }}
+          volumes:
+            - name: dump
+              persistentVolumeClaim:
+                claimName: {{ include "hnq.fullname" . }}-dump
+            {{- if .Values.backup.rclone.enabled }}
+            - name: rclone-config
+              secret:
+                secretName: {{ .Values.backup.rclone.secretName }}
+            {{- end }}
+{{- end }}

@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "hnq.fullname" . }}
+  namespace: {{ include "hnq.namespace" . }}
+  labels:
+{{ include "hnq.labels" . | trim | indent 4 }}
+  annotations:
+{{ include "hnq.syncWave" (dict "kind" "StatefulSet" "chart" "datastore") | trim | indent 4 }}
+spec:
+  serviceName: {{ include "hnq.fullname" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+{{ include "hnq.selectorLabels" . | trim | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ include "hnq.labels" . | trim | indent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+{{ toYaml . | trim | indent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml . | trim | indent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+{{ toYaml . | trim | indent 8 }}
+      {{- end }}
+{{ include "hnq.nodeSelector" . | trim | indent 6 }}
+{{- with (include "hnq.tolerations" .) }}{{ . | nindent 6 }}{{- end }}
+      containers:
+        - name: {{ include "hnq.name" . }}
+          image: {{ include "hnq.image" (dict "ctx" . "image" .Values.image) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          {{- with .Values.command }}
+          command:
+{{ toYaml . | trim | indent 12 }}
+          {{- end }}
+          {{- with .Values.args }}
+          args:
+{{ toYaml . | trim | indent 12 }}
+          {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext:
+{{ toYaml . | trim | indent 12 }}
+          {{- end }}
+          ports:
+            - name: {{ .Values.portName }}
+              containerPort: {{ .Values.port | int }}
+              protocol: TCP
+          {{- with .Values.extraEnv }}
+          env:
+{{ toYaml . | trim | indent 12 }}
+          {{- end }}
+          {{- if .Values.secretName }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.secretName }}
+          {{- end }}
+{{ include "hnq.tcpProbes" (dict "ctx" . "port" .Values.portName) | trim | indent 10 }}
+{{ include "hnq.resources" (dict "ctx" . "resources" .Values.resources) | trim | indent 10 }}
+          {{- if .Values.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+              {{- with .Values.persistence.subPath }}
+              subPath: {{ . }}
+              {{- end }}
+          {{- end }}
+        {{- if .Values.exporter.enabled }}
+        - name: exporter
+          image: {{ include "hnq.image" (dict "ctx" . "image" .Values.exporter.image) | quote }}
+          ports:
+            - name: {{ .Values.serviceMonitor.port }}
+              containerPort: {{ .Values.exporter.port | int }}
+              protocol: TCP
+          {{- with .Values.exporter.extraEnv }}
+          env:
+{{ toYaml . | trim | indent 12 }}
+          {{- end }}
+          {{- if .Values.secretName }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.secretName }}
+          {{- end }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.serviceMonitor.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.serviceMonitor.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+        {{- end }}
+      {{- if .Values.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "hnq.fullname" . }}-data
+      {{- end }}

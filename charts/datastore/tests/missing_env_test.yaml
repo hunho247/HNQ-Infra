@@ -1,0 +1,23 @@
+suite: datastore — quên nạp /env/<env>.yaml thì fail ngay
+templates:
+  - templates/pvc.yaml
+set:
+  image.repository: docker.io/library/postgres
+  image.tag: "17.10"
+  env.name: prod
+  env.nodeSelector:
+    hnq.dev/env-prod: "true"
+release:
+  name: storage-postgres
+tests:
+  - it: thiếu persistence.storageClass thì fail, không rơi về class mặc định
+    asserts:
+      - failedTemplate:
+          errorMessage: "hnq.storageClass: persistence.storageClass rỗng — thiếu /env/<env>.yaml"
+
+  - it: thiếu persistence.size thì fail, không tạo PVC 0 byte
+    set:
+      persistence.storageClass: hnq-local
+    asserts:
+      - failedTemplate:
+          errorMessage: "datastore: thiếu persistence.size — khai ở /env/<env>.yaml hoặc values-<env>.yaml"

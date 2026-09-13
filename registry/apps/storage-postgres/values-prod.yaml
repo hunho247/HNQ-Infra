@@ -1,0 +1,21 @@
+# storage-postgres — prod
+# Chỉ ghi phần KHÁC mặc định của charts/datastore/values.yaml và /env/prod.yaml.
+image:
+  repository: docker.io/library/postgres
+  tag: "17.10"
+
+port: 5432
+portName: postgres
+secretName: storage-postgres-credentials
+
+persistence:
+  size: 20Gi
+  mountPath: /var/lib/postgresql/data
+  subPath: pgdata
+
+backup:
+  fileSuffix: sql.gz
+  # Job dump chạy ở pod riêng — phải trỏ -h vào Service, không phải localhost.
+  command: |
+    PGPASSWORD="$POSTGRES_PASSWORD" pg_dumpall -h storage-postgres -U "$POSTGRES_USER" \
+      | gzip > "$DUMP_FILE"

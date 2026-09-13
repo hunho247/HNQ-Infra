@@ -1,0 +1,115 @@
+suite: webservice — worker, probe TCP và trộn secret vào file cấu hình
+templates:
+  - templates/deployment.yaml
+  - templates/service.yaml
+  - templates/ingress.yaml
+  - templates/pvc.yaml
+values:
+  - ../../../env/dev.yaml
+set:
+  image.repository: ghcr.io/hnq-tech/demo
+  image.tag: abc1234
+  ingress.host: demo-dev.l2cteam.work
+release:
+  name: demo
+tests:
+  - it: worker không sinh Service — không ai gửi traffic tới nó
+    template: templates/service.yaml
+    set:
+      service.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: worker không sinh Ingress
+    template: templates/ingress.yaml
+    set:
+      service.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: worker mang nhãn để policy biết được phép bỏ readinessProbe
+    template: templates/deployment.yaml
+    set:
+      service.enabled: false
+    asserts:
+      - equal:
+          path: spec.template.metadata.labels["hnq.dev/workload"]
+          value: worker
+      - isNull:
+          path: spec.template.spec.containers[0].readinessProbe
+      - isNull:
+          path: spec.template.spec.containers[0].ports
+
+  - it: service bình thường vẫn mang nhãn service và vẫn bắt buộc probe
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.metadata.labels["hnq.dev/workload"]
+          value: service
+      - isNotEmpty:
+          path: spec.template.spec.containers[0].readinessProbe
+
+  - it: probeType tcp kiểm cổng thay vì gọi HTTP
+    template: templates/deployment.yaml
+    set:
+      probeType: tcp
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.tcpSocket.port
+          value: http
+      - isNull:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet
+
+  - it: configInject sinh initContainer đọc Secret, app đọc bản đã trộn
+    template: templates/deployment.yaml
+    set:
+      app.secretName: demo-config
+      app.config: |
+        database:
+          host: x
+      app.configInject.fields:
+        - path: .database.user
+          key: DB_USER
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: config-inject
+      - equal:
+          path: spec.template.spec.initContainers[0].env[0].valueFrom.secretKeyRef.name
+          value: demo-config
+      # Container chính mount emptyDir đã trộn, KHÔNG mount thẳng ConfigMap —
+      # nếu không thì mật khẩu không bao giờ tới được app.
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0].name
+          value: config-merged
+
+  - it: configInject mà thiếu secretName thì fail template
+    template: templates/deployment.yaml
+    set:
+      app.config: "a: b"
+      app.configInject.fields:
+        - path: .a
+          key: DB_USER
+    asserts:
+      - failedTemplate:
+          errorMessage: "app.configInject cần app.secretName"
+
+  - it: PVC tuỳ chọn vẫn phải là hnq-local và ở wave -1
+    template: templates/pvc.yaml
+    set:
+      persistence.enabled: true
+    asserts:
+      - equal:
+          path: spec.storageClassName
+          value: hnq-local
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "-1"
+
+  - it: không bật persistence thì không có PVC nào
+    template: templates/pvc.yaml
+    asserts:
+      - hasDocuments:
+          count: 0

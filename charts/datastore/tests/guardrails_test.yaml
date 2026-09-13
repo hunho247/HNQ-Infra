@@ -1,0 +1,89 @@
+suite: datastore — PVC, sync-wave và dump hằng giờ
+templates:
+  - templates/statefulset.yaml
+  - templates/pvc.yaml
+  - templates/backup.yaml
+values:
+  - ../../../env/prod.yaml
+set:
+  image.repository: docker.io/library/postgres
+  image.tag: "17.10"
+  port: 5432
+  portName: postgres
+  secretName: storage-postgres-credentials
+  backup.command: 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" | gzip > "$DUMP_FILE"'
+release:
+  name: storage-postgres
+tests:
+  # values.schema.json chặn mọi class khác hnq-local ngay ở helm lint
+  # (persistence.storageClass là const). Test ở đây giữ phần còn lại: giá trị
+  # thật sự đi vào PVC, và trường hợp thiếu hẳn env file (suite missing_env).
+  - it: PVC luôn dùng storageClass hnq-local — class khác là mất Retain và mất Velero
+    template: templates/pvc.yaml
+    asserts:
+      - equal:
+          path: spec.storageClassName
+          value: hnq-local
+
+  - it: PVC ở wave -1, trước workload
+    template: templates/pvc.yaml
+    asserts:
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "-1"
+
+  - it: workload datastore ở wave 0, trước webservice
+    template: templates/statefulset.yaml
+    asserts:
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "0"
+
+  - it: một replica, có nodeSelector, có resources
+    template: templates/statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+      - equal:
+          path: spec.template.spec.nodeSelector["hnq.dev/env-prod"]
+          value: "true"
+      - isNotEmpty:
+          path: spec.template.spec.containers[0].resources.limits
+
+  - it: prod có CronJob dump hằng giờ, dump xong mới upload
+    template: templates/backup.yaml
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: spec.schedule
+          value: "0 * * * *"
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.initContainers[0].name
+          value: dump
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].name
+          value: upload
+
+  - it: bật backup mà không khai lệnh dump thì fail, không tạo CronJob rỗng
+    template: templates/backup.yaml
+    set:
+      backup.command: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: "datastore: backup.enabled=true nhưng thiếu backup.command — không biết dump bằng lệnh gì"
+
+  - it: dev không có CronJob dump — dựng lại từ Git
+    template: templates/backup.yaml
+    values:
+      - ../../../env/dev.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: cấm tag latest
+    template: templates/statefulset.yaml
+    set:
+      image.tag: latest
+    asserts:
+      - failedTemplate: {}

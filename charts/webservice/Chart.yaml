@@ -1,0 +1,10 @@
+apiVersion: v2
+name: webservice
+description: Chart chung cho mọi HTTP service của HNQ
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+dependencies:
+  - name: hnq-common
+    version: 0.1.0
+    repository: file://../hnq-common

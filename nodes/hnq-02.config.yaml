@@ -1,0 +1,11 @@
+# /etc/rancher/k3s/config.yaml trên hnq-02 (máy nhà, agent, môi trường prod).
+server: https://hnq-01.<tailnet>.ts.net:6443   # ⚠️ tên MagicDNS, KHÔNG phải IP
+token: <token của hnq-01>                      # /var/lib/rancher/k3s/server/token
+node-name: hnq-02
+node-ip: 100.x.y.z                             # IP Tailscale của chính máy này
+flannel-iface: tailscale0
+
+node-label:
+  - "hnq.dev/env-prod=true"
+  - "hnq.dev/storage=true"
+  - "hnq.dev/edge=true"

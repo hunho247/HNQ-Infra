@@ -1,0 +1,5 @@
+charts/*/charts/*.tgz
+*.swp
+kubeconfig*
+.DS_Store
+.render/

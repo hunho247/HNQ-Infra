@@ -1,0 +1,35 @@
+# Values cho `helm install argocd argo/argo-cd` — lệnh cài đặt đầu tiên và
+# duy nhất chạy tay trước gitops/root.yaml (PLAN §7).
+configs:
+  cm:
+    admin.enabled: "true"
+    # Reconcile 3 phút thay vì 3 giây: 1 người vận hành không cần nhanh hơn,
+    # và repo-server đỡ nặng trên VPS nhỏ.
+    timeout.reconciliation: 180s
+  rbac:
+    # deny-by-default (D20). Chỉ tài khoản admin dùng được, vào qua
+    # port-forward trong tailnet.
+    policy.default: ""
+  params:
+    server.insecure: "true"
+
+server:
+  ingress:
+    # ⚠️ KHÔNG BAO GIỜ bật. ArgoCD vào bằng:
+    #   kubectl -n argocd port-forward svc/argocd-server 8080:80
+    enabled: false
+
+# 1 server, 1 người: HA của Redis chỉ thêm 3 pod phải sống trên một VPS nhỏ.
+redis-ha:
+  enabled: false
+
+# Toàn bộ ArgoCD ở trên hnq-01 — một trong 5 thành phần được mang toleration
+# của taint control-plane (PLAN §2).
+global:
+  nodeSelector:
+    hnq.dev/role: control-plane
+  tolerations:
+    - key: hnq.dev/dedicated
+      operator: Equal
+      value: control-plane
+      effect: NoSchedule

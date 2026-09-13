@@ -1,0 +1,19 @@
+apiVersion: hnq.dev/v1
+kind: ServiceRelease
+metadata:
+  name: biboo-clinic
+spec:
+  category: app
+  chart: webservice
+  # Nạp thêm /registry/apps/biboo-clinic/config/config-<env>.yaml
+  config: true
+  environments:
+    # prod bật ở P6, sau khi P5 xong (PLAN §16, cửa chặn 2).
+    - env: dev
+  requiredSecrets:
+    - name: biboo-clinic-backend
+      keys: [DB_USER, DB_PASS, JWT_SECRET]
+    - name: biboo-clinic-keystore
+      keys: [private.pem, public.pem]
+    - name: biboo-clinic-registry
+      keys: [.dockerconfigjson]

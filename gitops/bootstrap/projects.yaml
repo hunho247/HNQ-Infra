@@ -1,0 +1,40 @@
+# 2 AppProject (D21). app = service của mình, không được đụng tài nguyên
+# cấp cluster. platform = chart bên thứ ba, được phép.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: app
+  namespace: argocd
+spec:
+  description: Service của HNQ — webservice và datastore
+  sourceRepos:
+    - https://github.com/hunho247/HNQ-Infra.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: '*-dev'
+    - server: https://kubernetes.default.svc
+      namespace: '*-prod'
+  # Rỗng có chủ ý: một chart app không bao giờ cần ClusterRole hay CRD.
+  # Cần thật thì đó là việc của project platform, và phải có người đọc PR.
+  clusterResourceWhitelist: []
+  namespaceResourceBlacklist:
+    - group: ''
+      kind: ResourceQuota
+    - group: ''
+      kind: LimitRange
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  description: Chart bên thứ ba — cert-manager, Velero, monitoring...
+  sourceRepos:
+    - '*'
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: '*'
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'

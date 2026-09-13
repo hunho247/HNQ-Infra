@@ -1,0 +1,104 @@
+# charts/webservice/values.yaml — mặc định cho MỌI service HTTP.
+# Thứ tự nạp: file này → /env/<env>.yaml → registry/apps/<svc>/values-<env>.yaml
+#             (+ /registry/apps/<svc>/config/config-<env>.yaml nếu spec.config: true)
+# Giá trị riêng của một service KHÔNG đặt ở đây.
+
+replicaCount: 1
+
+image:
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Tên Secret chứa docker registry credential. Khai ở values-<env>.yaml của service.
+imagePullSecrets: []
+
+# Ghi đè entrypoint của image. Để trống là dùng mặc định của image.
+command: []
+args: []
+
+containerPort: 8080
+# http = kiểm bằng GET probePath (mặc định, và là thứ nên dùng).
+# tcp  = chỉ kiểm cổng có mở không. Dùng khi app KHÔNG có endpoint sức khoẻ:
+#        yếu hơn hẳn (cổng mở không có nghĩa app còn phục vụ được), nên coi
+#        đây là nợ, không phải lựa chọn.
+probeType: http
+# Đường kiểm tra sức khoẻ. hnq.probes fail template nếu rỗng (probeType: http).
+probePath: /health
+
+service:
+  # false = worker: không Service, không Ingress, không probe, không cổng.
+  enabled: true
+  port: 80
+
+ingress:
+  enabled: true
+  host: ""
+  path: /
+  className: traefik
+  annotations: {}
+
+app:
+  # Secret chính (envFrom). Tên phải khớp registry/apps/<svc>/service.yaml.
+  secretName: ""
+  # Secret phụ mount thành file, ví dụ firebase-credentials.json.
+  # subPath: mount đúng MỘT khoá thành đúng một file, thay vì cả Secret thành
+  # một thư mục.
+  fileSecrets: []
+  #  - name: hnq-obgyn-clinic-service
+  #    mountPath: /app/credentials
+  #  - name: gorush-credentials
+  #    mountPath: /home/gorush/google-services.json
+  #    subPath: google-services.json
+  env: []
+  # Nội dung file cấu hình — đến từ registry/apps/<svc>/config/config-<env>.yaml
+  config: ""
+  configFileName: config.yaml
+  configMountPath: /app/config
+  # Ứng dụng đọc cấu hình qua biến môi trường thay vì file: khai tên biến ở
+  # đây, ConfigMap vẫn là một (không có hai nguồn sự thật).
+  configEnvVar: ""
+  # Không mount ConfigMap thành file (chỉ dùng configEnvVar).
+  configMount: true
+  # Trộn giá trị từ Secret vào file cấu hình trước khi app đọc — cho ứng dụng
+  # chỉ biết đọc file, không đọc biến môi trường. key là khoá trong
+  # app.secretName, đồng thời là tên biến môi trường của initContainer.
+  configInject:
+    fields: []
+    #  - path: .database.user
+    #    key: DB_USER
+    image:
+      repository: docker.io/mikefarah/yq
+      tag: "4.44.1"
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  path: /metrics
+  port: http
+
+# PVC nhỏ cho service vốn không trạng thái (ví dụ file cấu hình do chính app
+# ghi ra). Bật nó là GẮN service vào một node: node chết thì phải theo R4 mới
+# dời được. Mặc định tắt — và nên giữ tắt.
+persistence:
+  enabled: false
+  size: 1Gi
+  mountPath: /data
+
+# hostNetwork: xem ghi chú trong templates/deployment.yaml. Bật là phải sửa cả
+# ci/policy/security.rego.
+hostNetwork: false
+
+# resources / probes / env đến từ /env/<env>.yaml. Không đặt mặc định ở đây:
+# thiếu file env là lỗi phải thấy ngay, không phải lỗi âm thầm chạy bằng giá trị khác.
+resources: {}
+
+podSecurityContext: {}
+securityContext: {}
+podAnnotations: {}
+
+serviceAccount:
+  create: false
+  name: default
+
+tolerations: []

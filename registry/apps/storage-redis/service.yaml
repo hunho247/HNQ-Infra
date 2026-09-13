@@ -1,0 +1,16 @@
+apiVersion: hnq.dev/v1
+kind: ServiceRelease
+metadata:
+  name: storage-redis
+spec:
+  category: app
+  chart: datastore
+  # Không có file cấu hình riêng (registry/README.md)
+  config: false
+  environments:
+    # prod bật ở P6, sau khi P5 (Velero + dump hằng giờ) xong — thêm
+    # "- env: prod" vào đây là có Application prod, không sửa file nào khác.
+    - env: dev
+  requiredSecrets:
+    - name: storage-redis-credentials
+      keys: [REDIS_PASSWORD]

@@ -1,0 +1,20 @@
+# storage-mariadb — prod
+# Chỉ ghi phần KHÁC mặc định của charts/datastore/values.yaml và /env/prod.yaml.
+image:
+  repository: docker.io/library/mariadb
+  tag: "11.8.5"
+
+port: 3306
+portName: mariadb
+secretName: storage-mariadb-credentials
+
+persistence:
+  size: 20Gi
+  mountPath: /var/lib/mysql
+
+backup:
+  fileSuffix: sql.gz
+  # Job dump chạy ở pod riêng — phải trỏ -h vào Service, không phải localhost.
+  command: |
+    mariadb-dump -h storage-mariadb -u root -p"$MARIADB_ROOT_PASSWORD" \
+      --all-databases --single-transaction --quick | gzip > "$DUMP_FILE"

@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hnq.fullname" . }}
+  namespace: {{ include "hnq.namespace" . }}
+  labels:
+{{ include "hnq.labels" . | trim | indent 4 }}
+  annotations:
+{{ include "hnq.syncWave" (dict "kind" "Service") | trim | indent 4 }}
+spec:
+  # Headless: client trong cluster nối thẳng tới pod, không qua kube-proxy.
+  clusterIP: None
+  ports:
+    - name: {{ .Values.portName }}
+      port: {{ .Values.port | int }}
+      targetPort: {{ .Values.portName }}
+      protocol: TCP
+    {{- range .Values.extraPorts }}
+    - name: {{ .name }}
+      port: {{ .port | int }}
+      targetPort: {{ .port | int }}
+      protocol: TCP
+    {{- end }}
+    {{- if .Values.exporter.enabled }}
+    - name: {{ .Values.serviceMonitor.port }}
+      port: {{ .Values.exporter.port | int }}
+      targetPort: {{ .Values.serviceMonitor.port }}
+      protocol: TCP
+    {{- end }}
+  selector:
+{{ include "hnq.selectorLabels" . | trim | indent 4 }}

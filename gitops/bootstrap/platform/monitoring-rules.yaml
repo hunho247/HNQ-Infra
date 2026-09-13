@@ -1,0 +1,21 @@
+# Wave 2: 8 alert của PLAN §12. Tách khỏi Application kube-prometheus-stack để
+# sửa một ngưỡng không phải đụng vào values của cả chart.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-rules
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/hunho247/HNQ-Infra.git
+    targetRevision: main
+    path: gitops/manifests/monitoring
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: { selfHeal: true, prune: false }
+    syncOptions: [ServerSideApply=true]

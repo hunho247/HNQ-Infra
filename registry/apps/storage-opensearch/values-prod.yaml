@@ -1,0 +1,27 @@
+# storage-opensearch — prod
+# Chỉ ghi phần KHÁC mặc định của charts/datastore/values.yaml và /env/prod.yaml.
+image:
+  repository: docker.io/opensearchproject/opensearch
+  tag: "2.19.4"
+
+port: 9200
+portName: opensearch
+secretName: storage-opensearch-credentials
+
+persistence:
+  size: 30Gi
+  mountPath: /usr/share/opensearch/data
+
+extraEnv:
+  - name: discovery.type
+    value: single-node
+  - name: bootstrap.memory_lock
+    value: "true"
+  - name: OPENSEARCH_JAVA_OPTS
+    value: "-Xms512m -Xmx512m"
+
+backup:
+  # Không dump logic được bằng một lệnh: dữ liệu nằm trong file trên PV.
+  # Đường lùi là Velero File System Backup hằng ngày (PLAN §9, lớp 2a),
+  # mất tối đa 24 giờ thay vì 1 giờ — chấp nhận vì đây là dữ liệu dựng lại được.
+  enabled: false

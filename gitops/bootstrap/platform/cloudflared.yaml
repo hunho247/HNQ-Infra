@@ -1,0 +1,21 @@
+# Wave 0: đường vào từ internet (D18, PLAN §10). 2 replica trên 2 máy nhà —
+# hnq-01 chết thì traffic khách hàng không đứt.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cloudflared
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/hunho247/HNQ-Infra.git
+    targetRevision: main
+    path: gitops/manifests/cloudflared
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cloudflared
+  syncPolicy:
+    automated: { selfHeal: true, prune: false }
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]

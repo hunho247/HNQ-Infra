@@ -1,0 +1,22 @@
+{{- if .Values.persistence.enabled }}
+{{- $size := .Values.persistence.size }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  # PVC rời, KHÔNG dùng volumeClaimTemplates: template của StatefulSet là bất
+  # biến, và PVC rời thì prune:false + reclaimPolicy Retain giữ được dữ liệu
+  # khi Application bị xoá (D8).
+  name: {{ include "hnq.fullname" . }}-data
+  namespace: {{ include "hnq.namespace" . }}
+  labels:
+{{ include "hnq.labels" . | trim | indent 4 }}
+  annotations:
+{{ include "hnq.syncWave" (dict "kind" "PersistentVolumeClaim") | trim | indent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ include "hnq.storageClass" . }}
+  resources:
+    requests:
+      storage: {{ required "datastore: thiếu persistence.size — khai ở /env/<env>.yaml hoặc values-<env>.yaml" $size }}
+{{- end }}

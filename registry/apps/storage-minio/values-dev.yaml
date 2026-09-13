@@ -1,0 +1,32 @@
+# storage-minio — dev
+# Chỉ ghi phần KHÁC mặc định của charts/datastore/values.yaml và /env/dev.yaml.
+image:
+  repository: docker.io/minio/minio
+  tag: "RELEASE.2025-04-22T22-12-26Z"
+
+port: 9000
+portName: minio
+secretName: storage-minio-credentials
+
+persistence:
+  size: 20Gi
+  mountPath: /data
+
+extraPorts:
+  - name: console
+    port: 9001
+
+# Ngoại lệ có chủ ý của chart datastore: client tải file bằng URL ký sẵn nên
+# host API phải ra được internet. Console thì không — vào bằng port-forward.
+ingress:
+  enabled: true
+  hosts:
+    - name: api
+      host: storage-minio-api-dev.l2cteam.work
+      port: 9000
+
+command: ["minio"]
+args: ["server", "/data", "--console-address", ":9001"]
+
+# Console 9001 không có Ingress: console quản trị không cần ra internet.
+#   kubectl -n storage-minio-dev port-forward sts/storage-minio 9001

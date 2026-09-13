@@ -1,0 +1,13 @@
+# storage-mariadb — dev
+# Chỉ ghi phần KHÁC mặc định của charts/datastore/values.yaml và /env/dev.yaml.
+image:
+  repository: docker.io/library/mariadb
+  tag: "11.8.5"
+
+port: 3306
+portName: mariadb
+secretName: storage-mariadb-credentials
+
+persistence:
+  size: 5Gi
+  mountPath: /var/lib/mysql

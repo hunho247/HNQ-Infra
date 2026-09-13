@@ -1,0 +1,36 @@
+# gorush — prod. Chỉ ghi phần KHÁC mặc định.
+# gorush là máy chủ đẩy thông báo (FCM + APNs) mà push-notify gọi tới.
+image:
+  repository: docker.io/appleboy/gorush
+  # Chart cũ dùng tag latest — cấm (D8). Pin bản cố định; Renovate mở PR khi
+  # có bản mới.
+  tag: "1.18.5"
+
+containerPort: 10088
+# health_uri của gorush, khai ngay trong config bên dưới.
+probePath: /healthz
+
+app:
+  configFileName: config.yml
+  configMountPath: /home/gorush
+  fileSecrets:
+    - name: gorush-credentials
+      mountPath: /home/gorush/google-services.json
+      subPath: google-services.json
+    - name: gorush-credentials
+      mountPath: /home/gorush/AuthKey.p8
+      subPath: AuthKey.p8
+
+args: ["-c", "/home/gorush/config.yml"]
+
+service:
+  port: 10088
+
+ingress:
+  # Chỉ push-notify trong cluster gọi tới.
+  enabled: false
+
+serviceMonitor:
+  # gorush có /metrics sẵn, nhưng ServiceMonitor cần port tên http — đã có.
+  enabled: true
+  path: /metrics
