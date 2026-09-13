@@ -1,107 +1,682 @@
-# Kế hoạch hạ tầng k3s + ArgoCD
+# Kế hoạch triển khai k3s + ArgoCD
 
-> **Đọc file này 1 lần** để hiểu hệ thống. Vận hành hằng ngày → [OPERATIONS.md](./OPERATIONS.md). Đang có sự cố → [RECOVERY.md](./RECOVERY.md).
+> **Bản thực thi.** Mọi quyết định đã chốt ở [§1](#1-bảng-quyết-định-đã-chốt) — không còn mục nào chờ quyết.
+> Vận hành hằng ngày → [OPERATIONS.md](./OPERATIONS.md) · Đang có sự cố → [RECOVERY.md](./RECOVERY.md)
 
 | | |
 |---|---|
-| **Bối cảnh** | Xây mới hoàn toàn, repo GitHub mới, không migrate dữ liệu cũ |
-| **Phần cứng** | 1 VPS thuê (master) + 2 máy ở nhà (node), join cluster qua Tailscale |
-| **Người vận hành** | 1 người |
-| **Mục tiêu** | Dùng đúng pattern cộng đồng đã kiểm chứng, và **khi hỏng thì phục hồi nhanh nhất** |
-| **Cơ sở** | [RESEARCH_BEST_PRACTICES.md](./RESEARCH_BEST_PRACTICES.md) — hồ sơ tra cứu, không cần đọc để triển khai |
+| **Xuất phát** | Cluster mới, repo mới, không migrate dữ liệu cũ |
+| **Phần cứng** | `hnq-01` VPS thuê (control-plane) · `hnq-02`, `hnq-03` máy ở nhà (agent) |
+| **Mạng** | 3 máy join qua Tailscale, flannel chạy trên `tailscale0` |
+| **Vào từ internet** | Cloudflare Tunnel chạy in-cluster |
+| **Người vận hành** | 1 |
 
 ---
 
-## 1. Toàn bộ hệ thống trong một trang
+## 1. Bảng quyết định đã chốt
 
-Mọi thứ trong repo này là **một pattern cộng đồng đã dùng rộng rãi**, không có gì tự chế:
+Dòng 🔄 là **đổi so với bản kế hoạch trước** — lý do ở cột cuối, chi tiết thi công ở mục được trỏ tới.
 
-| Thành phần | Chọn gì | Vì sao đây là lựa chọn phổ biến |
-|---|---|---|
-| Kubernetes | **k3s** + embedded etcd | Bản phân phối nhẹ phổ biến nhất cho cluster nhỏ. etcd cho snapshot + restore có sẵn. |
-| GitOps | **ArgoCD** | Chuẩn de-facto. UI có sẵn thay cho portal tự viết. |
-| Sinh Application | **ApplicationSet** cho service của mình, **App-of-Apps** cho chart bên thứ ba | Phân vai đúng như cộng đồng khuyến nghị: factory cho cái lặp lại, danh sách tường minh cho cái cố định |
-| Môi trường | **1 branch `main`**, tách bằng thư mục + file values | Branch-per-environment là anti-pattern có tên. 1 branch mới promote được từng service một. |
-| Chart | **1 library chart + 2 chart chung** | `webservice` cho mọi HTTP service, `datastore` cho mọi database. Thêm service = viết values, không viết template. |
-| Secret | **Sealed Secrets** | Rào cản thấp nhất, không cần hệ thống ngoài. Lộ trình chuẩn là bắt đầu ở đây. |
-| Ingress | **Traefik** (có sẵn trong k3s) + **cert-manager** | Mặc định của k3s, không cần thay |
-| Vào từ internet | **Cloudflare Tunnel** chạy in-cluster | Cách phổ biến nhất để đưa máy ở nhà (sau NAT, IP động) ra internet |
-| Giám sát | **kube-prometheus-stack** | Mặc định của cộng đồng, tra lỗi trên Google dễ nhất |
-| Backup | **etcd snapshot → R2** + **Velero** + **dump database** | 3 lớp, mỗi lớp một mục đích |
-| Nâng cấp | **system-upgrade-controller** | Cách chuẩn của Rancher cho k3s: nâng cấp = PR đổi một dòng |
-| Nâng version chart | **Renovate** | Tự mở PR khi có bản mới |
-
-Chỗ duy nhất đi khác số đông là **không làm HA** và **không dùng storage phân tán** — lý do ở [§3](#3-vì-sao-không-ha) và [§7](#7-lưu-trữ).
+| # | Hạng mục | Chốt | Ghi chú |
+|---|---|---|---|
+| D1 | Control-plane | **1 server, không HA** | etcd embedded (`cluster-init`) để có snapshot/restore chính thống |
+| D2 | Môi trường | **1 branch `main`**, tách bằng thư mục + values | Branch-per-env là anti-pattern; 1 branch mới promote từng service được |
+| D3 | Sinh Application | **ApplicationSet** cho service mình, **Application tường minh** cho chart bên thứ ba | [§7](#7-gitops) |
+| D4 | Sync prod | **`selfHeal: true`, `prune: false`, `automated` bật** | Dev bật cả hai. Không dùng manual sync — MTTR của 1 người quan trọng hơn |
+| D5 | Promotion | **`make promote`** (script + PR), **không dùng Kargo** | Kargo có giá trị từ 3 môi trường trở lên |
+| D6 | Secret | **Sealed Secrets** | ESO khi nào có cluster thứ hai |
+| D7 | Chart | **1 library + 2 chart chung** (`hnq-common`, `webservice`, `datastore`) | [§6](#6-chart) |
+| D8 | Quay lui | Image tag = **git SHA** (cấm `latest`), `prune: false` ở prod, PV `Retain` | Mọi thay đổi phải revert được bằng 1 commit |
+| D9 🔄 | Giữ workload khỏi master | **Taint `hnq.dev/dedicated=control-plane:NoSchedule`** trên `hnq-01` | Trước: chỉ dựa vào policy CI. Taint là scheduler ép, CI chỉ bắt lúc review — giữ cả hai |
+| D10 🔄 | ServiceLB | **Tắt** (`disable: servicelb`), Traefik Service = `ClusterIP` | Mọi traffic vào qua Cloudflare Tunnel → không cần LoadBalancer, bỏ luôn nhãn `enablelb` |
+| D11 🔄 | local-path | **Tắt gói sẵn** (`disable: local-storage`), tự quản bằng Helm chart | Bắt buộc: `volumeType: local` — **Velero không backup được `hostPath`** ([§9](#9-backup)) |
+| D12 🔄 | CoreDNS | Giữ bản gói sẵn, **`scale --replicas=2`** | Manifest k3s **không khai `replicas`** nên scale không bị ghi đè khi k3s restart/upgrade; D9 giữ 2 pod ở 2 máy nhà |
+| D13 🔄 | Khoá R2 cho etcd snapshot | **`etcd-s3-config-secret`** | Không để access key thô trong `/etc/rancher/k3s/config.yaml` |
+| D14 🔄 | Secret trong etcd | **`secrets-encryption: true`** | Snapshot rời khỏi máy (R2 + laptop) → phải mã hoá. Thêm 1 món vào recovery kit ([§11](#11-secret)) |
+| D15 🔄 | ApplicationSet an toàn | **`applicationsSync: create-update`** + `preserveResourcesOnDeletion: true` | Generator hỏng **không thể** xoá hàng loạt Application; xoá service là thao tác tay có chủ ý |
+| D16 🔄 | Thứ tự sync | **sync-wave** khai trong `hnq-common` | [§6](#6-chart) |
+| D17 🔄 | Velero | **File System Backup (kopia)**, `defaultVolumesToFsBackup: true`, không CSI | local-path không có CSI snapshot |
+| D18 🔄 | cloudflared → Traefik | `https://traefik.kube-system:443` + `noTLSVerify: true`, **1 rule catch-all** | Catch-all không khớp SNI được; hop nằm trong cluster và link giữa node đã là WireGuard |
+| D19 | TLS | **cert-manager + DNS-01 Cloudflare**, wildcard mỗi env | Giữ cert thật ở origin thay vì chỉ TLS ở edge |
+| D20 | ArgoCD | Giữ tài khoản `admin`, **không ingress**, vào bằng `port-forward` qua tailnet | Dex/OIDC thêm 4 phụ thuộc phải sống mới đăng nhập được |
+| D21 | AppProject | **2 cái**: `app` và `platform` | [§7](#7-gitops) |
+| D22 | CI | `yamllint → schema → helm lint/unittest → render-all → kubeconform → conftest → gitleaks → trivy` | [§13](#13-ci) |
+| D23 | Nâng version chart | **Renovate** tự mở PR | Pin version tuyệt đối ở mọi `Application`/`Chart.yaml` |
+| D24 | Nâng k3s | **system-upgrade-controller**, `concurrency: 1` | [§15](#15-nâng-cấp) |
+| D25 | Không làm trong v1 | Longhorn · HA 3 server · Dex/OIDC · Tailscale Operator · Kargo · NetworkPolicy · sync window · Backstage · `replicas: 2` cho app | Xét lại khi có máy thứ 4 chung LAN **hoặc** người vận hành thứ hai |
 
 ---
 
-## 2. Topology
+## 2. Topology và cấu hình node
 
-```mermaid
-flowchart TB
-  U["Người dùng"] --> CF["Cloudflare<br/>DNS · TLS · WAF"]
+| Node | Vai trò | Nhãn | Taint | Chạy gì |
+|---|---|---|---|---|
+| **hnq-01** VPS | control-plane + etcd | `hnq.dev/role=control-plane` | `hnq.dev/dedicated=control-plane:NoSchedule` | apiserver, etcd, ArgoCD, cert-manager, sealed-secrets, Velero server, system-upgrade-controller |
+| **hnq-02** nhà | agent | `hnq.dev/env-prod=true`<br>`hnq.dev/storage=true`<br>`hnq.dev/edge=true` | — | mọi `*-prod`, 1 Traefik, 1 cloudflared, 1 CoreDNS |
+| **hnq-03** nhà | agent | `hnq.dev/env-dev=true`<br>`hnq.dev/storage=true`<br>`hnq.dev/edge=true` | — | mọi `*-dev`, 1 Traefik, 1 cloudflared, 1 CoreDNS, monitoring |
 
-  subgraph TN["Tailnet — cả 3 máy join cluster qua Tailscale"]
-    M["<b>hnq-01</b> · VPS thuê<br/>control-plane + etcd<br/>hnq.dev/role=control-plane"]
-    N1["<b>hnq-02</b> · máy nhà<br/>môi trường PROD<br/>hnq.dev/env-prod=true"]
-    N2["<b>hnq-03</b> · máy nhà<br/>môi trường DEV<br/>hnq.dev/env-dev=true"]
-  end
+Chỉ 5 thành phần dưới đây được phép mang toleration cho taint của `hnq-01` — CI chặn mọi chart khác khai nó:
 
-  CF -.->|"Cloudflare Tunnel"| N1
-  CF -.->|"Cloudflare Tunnel"| N2
-  M ---|"API 6443 · flannel qua tailscale0"| N1
-  M --- N2
-  N1 ---|LAN| N2
+```
+argocd · cert-manager · sealed-secrets · velero (server) · system-upgrade-controller
 ```
 
-| Máy | Chạy gì | Nếu mất nó |
+**Thư mục trên đĩa** (tạo trước khi cài k3s, đặt ở partition riêng nếu được):
+
+| Đường dẫn | Máy | Dùng cho |
 |---|---|---|
-| **hnq-01** (VPS) | apiserver, etcd, ArgoCD, cert-manager, sealed-secrets, Velero | **Khách hàng không bị ảnh hưởng.** Mất `kubectl`, mất sync, mất scheduling. → [R5](./RECOVERY.md#r5--etcd-hỏng-hoặc-apiserver-không-lên)/[R6](./RECOVERY.md#r6--vps-mất-hoàn-toàn) |
-| **hnq-02** (nhà) | mọi `*-prod` + database prod, 1 Traefik, 1 cloudflared, 1 CoreDNS | Prod down → [R4](./RECOVERY.md#r4--node-prod-chết), ~30 phút |
-| **hnq-03** (nhà) | mọi `*-dev` + database dev, 1 Traefik, 1 cloudflared, 1 CoreDNS, **monitoring** | Dev down + mất monitoring, prod vẫn chạy → [R3](./RECOVERY.md#r3--node-dev-chết) |
+| `/srv/k3s/data/` | hnq-02, hnq-03 | local-path cấp volume |
+| `/srv/k3s/dump/` | hnq-02, hnq-03 | dump database hằng giờ |
+| `/srv/k3s/snapshots/` | hnq-01 | etcd snapshot cục bộ trước khi lên R2 |
 
-**Ba lý do chia như vậy:**
+> Nhãn khai trong `config.yaml` **chỉ áp dụng lúc node đăng ký lần đầu**. Sau đó nguồn sự thật là `kubectl label` — đây là cơ chế [R4](./RECOVERY.md#r4--node-prod-chết) dựa vào để dời cả môi trường prod bằng một lệnh.
 
-1. **etcd không tranh đĩa với workload** — nguyên nhân phổ biến nhất làm cluster k3s một-server treo.
-2. **Dữ liệu khách hàng không nằm trên VPS thuê** — mất VPS là mất control-plane, không phải mất dữ liệu.
-3. **Monitoring ở node dev** — đặt trên master thì mất master là mất luôn khả năng biết; đặt trên node prod thì node prod chết là mất monitoring đúng lúc cần nó nhất.
+### `hnq-01` — `/etc/rancher/k3s/config.yaml`
 
-> Master **không** taint. Thay vào đó CI có policy bắt buộc mọi workload khai `nodeSelector` — sai là CI chặn, không phải phát hiện lúc pod đã nằm nhầm chỗ.
+```yaml
+cluster-init: true
+node-name: hnq-01
+node-ip: 100.x.y.z                       # IP Tailscale
+node-external-ip: <IP public VPS>
+flannel-iface: tailscale0
+write-kubeconfig-mode: "600"
+secrets-encryption: true                 # D14
+
+node-label:
+  - "hnq.dev/role=control-plane"
+node-taint:
+  - "hnq.dev/dedicated=control-plane:NoSchedule"
+
+disable:
+  - servicelb                            # D10
+  - local-storage                        # D11
+
+tls-san:
+  - hnq-01.<tailnet>.ts.net              # tên MagicDNS — chìa khoá để thay VPS nhanh
+  - 100.x.y.z
+  - <IP public VPS>
+
+etcd-snapshot-schedule-cron: "0 */6 * * *"
+etcd-snapshot-retention: 20
+etcd-snapshot-dir: /srv/k3s/snapshots
+etcd-s3: true
+etcd-s3-config-secret: k3s-etcd-s3       # D13 — Secret ở namespace kube-system
+```
+
+### `hnq-02` / `hnq-03` — `/etc/rancher/k3s/config.yaml`
+
+```yaml
+server: https://hnq-01.<tailnet>.ts.net:6443    # tên MagicDNS, KHÔNG phải IP
+token: <token của hnq-01>
+node-name: hnq-02                               # hnq-03 trên máy còn lại
+node-ip: 100.x.y.z
+flannel-iface: tailscale0
+node-label:
+  - "hnq.dev/env-prod=true"                     # hnq-03: hnq.dev/env-dev=true
+  - "hnq.dev/storage=true"
+  - "hnq.dev/edge=true"
+```
+
+### Ba thứ không sửa được sau này mà không cài lại
+
+1. `cluster-init: true` (etcd thay vì SQLite)
+2. `flannel-iface: tailscale0`
+3. `--hostname` của Tailscale → đi vào TLS SAN và vào `server:` của 2 agent
 
 ---
 
-## 3. Vì sao không HA
+## 3. Add-on gói sẵn của k3s
 
-Không phải vì thiếu máy. Với topology này, HA **làm hệ thống tệ hơn**:
-
-| | 1 server (chọn) | 3 server HA qua Tailscale |
+| Add-on | Quyết định | Cách thi công |
 |---|---|---|
-| Mỗi lần ghi etcd | Ghi đĩa local, xong | Chờ quorum **qua WAN**, độ trễ thay đổi theo giờ |
-| Mất 1 đường mạng | Không ảnh hưởng | Có thể **mất quorum → cluster read-only** dù cả 3 máy đều sống |
-| Số thứ có thể hỏng | 1 etcd | 3 etcd + load balancer cho API + đồng bộ version 3 máy |
+| **Traefik** | Giữ, cấu hình lại | `HelmChartConfig` trong `kube-system` → [§10](#10-đường-dữ-liệu-vào) |
+| **CoreDNS** | Giữ, scale 2 | `kubectl -n kube-system scale deploy coredns --replicas=2` (nằm trong `make bootstrap`). Taint D9 đẩy pod xuống 2 máy nhà; `topologySpreadConstraints` có sẵn trong manifest k3s tách chúng ra 2 node |
+| **metrics-server** | Giữ nguyên | Tự chuyển xuống máy nhà do taint |
+| **ServiceLB** | **Tắt** | `disable: servicelb` |
+| **local-storage** | **Tắt**, thay bằng chart tự quản | `disable: local-storage` → [§8](#8-lưu-trữ) |
 
-Đổi lại phải làm thật tốt **hai** thứ dưới đây. Làm được hai thứ này thì "1 server, không HA" từ rủi ro thành lựa chọn hợp lý.
+⚠️ Không sửa file trong `/var/lib/rancher/k3s/server/manifests/` — k3s ghi đè lại mỗi lần khởi động. Chỉ dùng `disable:`, `HelmChartConfig`, hoặc trường **không** có trong manifest gốc (đó là lý do `replicas` của CoreDNS đổi được bền).
 
-### 3.1. Đường dữ liệu không phụ thuộc master
+---
 
-Khi control-plane chết, **kubelet không giết container đang chạy** — pod vẫn phục vụ. Vấn đề chỉ là ba thành phần trên đường đi của request thường bị vô tình đặt hết lên master. Chữa bằng cách ghim mỗi thứ **2 replica lên 2 máy ở nhà**:
+## 4. Cấu trúc repo
 
-| Thành phần | Cấu hình | Nếu không làm |
+```text
+HNQ-Infra/                     (branch main duy nhất)
+│
+├── registry/apps/             ⭐ NƠI DUY NHẤT sửa khi thêm service
+│   └── <tên-service>/
+│       ├── service.yaml              # chart nào, bật env nào, cần secret gì
+│       ├── values-dev.yaml           # chỉ ghi phần KHÁC mặc định
+│       ├── values-prod.yaml
+│       └── config/
+│
+├── charts/
+│   ├── hnq-common/                   # library: labels, probes, ingress, sync-wave
+│   ├── webservice/                   # mọi HTTP service
+│   └── datastore/                    # mọi database một node + CronJob dump
+│
+├── env/{dev,prod}.yaml               # khác biệt dev ↔ prod
+│
+├── gitops/
+│   ├── root.yaml                     # ⭐ FILE DUY NHẤT apply tay, đúng 1 lần
+│   ├── install/argocd-values.yaml
+│   └── bootstrap/
+│       ├── projects.yaml             # 2 AppProject
+│       ├── appset-apps.yaml          # ApplicationSet
+│       └── platform/*.yaml           # 7 Application bên thứ ba
+│
+├── secrets/{dev,prod}/               # SealedSecret đã mã hoá
+│
+├── ci/
+│   ├── policy/*.rego
+│   └── scripts/{new-service,render-all,promote,check-secrets}.sh
+│
+├── scripts/
+│   ├── status.sh  drift.sh  backup/
+│   └── dr/                           ⭐ NƠI ĐI TỚI KHI ĐANG SỰ CỐ
+│       ├── kit-check.sh      restore-etcd.sh    rebuild-master.sh
+│       └── failover-prod.sh  restore-db.sh
+│
+├── .github/{workflows/validate.yml,CODEOWNERS,renovate.json}
+├── docs/
+└── Makefile
+```
+
+**Quy ước cứng** (CI kiểm):
+
+| Thứ | Quy ước |
+|---|---|
+| Namespace | `<tên-service>-<env>` — suy ra, không khai trong values |
+| Release name Helm | `<tên-service>` |
+| Application | `<tên-service>-<env>` |
+| Secret | `<tên-service>-<thành-phần>`, file ở `secrets/<env>/<tên-service>/<thành-phần>.yaml` |
+| Image tag | 7 ký tự git SHA |
+
+---
+
+## 5. Khai báo service
+
+`registry/apps/lotus-clinic/service.yaml`:
+
+```yaml
+apiVersion: hnq.dev/v1
+kind: ServiceRelease
+metadata:
+  name: lotus-clinic
+spec:
+  category: app                  # app | platform → quyết định AppProject
+  chart: webservice              # webservice | datastore
+  environments:                  # chưa liệt kê "prod" → chưa có Application prod
+    - env: dev
+    - env: prod
+  requiredSecrets:               # CI đối chiếu với secrets/<env>/
+    - name: lotus-clinic-backend
+      keys: [DB_PASSWORD, JWT_SECRET]
+```
+
+`values-dev.yaml` chỉ ghi phần khác mặc định:
+
+```yaml
+image: { repository: ghcr.io/hnq-tech/lotus-backend, tag: 6aebe24 }
+ingress: { host: lotus-dev.l2cteam.work }
+app: { configFile: config/config_dev.yaml, secretName: lotus-clinic-backend }
+```
+
+Port, probe, resources, `nodeSelector`, issuer, `imagePullSecrets`, `serviceMonitor`, `storageClass` đến từ `env/<env>.yaml` + `charts/<chart>/values.yaml`.
+
+**Thêm service mới:** `make new-service NAME=abc-clinic CHART=webservice` → commit → PR → CI xanh → merge. Không viết file ArgoCD nào.
+
+---
+
+## 6. Chart
+
+### `charts/hnq-common` (library)
+
+Hàm bắt buộc, mọi chart khác gọi qua:
+
+| Helper | Sinh ra |
+|---|---|
+| `hnq.labels` | `app.kubernetes.io/*` + `hnq.dev/env` + `hnq.dev/service` |
+| `hnq.nodeSelector` | Nạp từ `env.nodeSelector`, **fail template nếu rỗng** |
+| `hnq.probes` | readiness + liveness, chặn deploy nếu chart không khai `probePath` |
+| `hnq.resources` | Bắt buộc có `requests` + `limits` |
+| `hnq.ingress` | Thêm annotation `cert-manager.io/cluster-issuer` từ `env` |
+| `hnq.syncWave` | Trả wave theo bảng dưới |
+
+**Sync wave (D16):**
+
+| Wave | Tài nguyên |
+|---|---|
+| `-3` | Namespace, ResourceQuota, LimitRange |
+| `-2` | SealedSecret, ConfigMap |
+| `-1` | PVC |
+| `0` | Workload của `datastore` |
+| `1` | Workload của `webservice` |
+| `2` | Service, Ingress, ServiceMonitor |
+
+### `charts/webservice`
+
+Deployment (1 replica) · Service · Ingress · ServiceMonitor · ConfigMap từ `config/` · tham chiếu Secret theo tên.
+
+### `charts/datastore`
+
+StatefulSet 1 replica · PVC `storageClassName: hnq-local` · Service headless · ServiceMonitor · **CronJob dump hằng giờ** (`backup.enabled`, `backup.command`) ghi vào PVC dump rồi `rclone copy` lên R2.
+
+### Kiểm chart
+
+- `values.schema.json` cho cả 2 chart → `helm lint` bắt sai trường ngay.
+- `helm-unittest` bắt buộc cho `hnq-common`: có `nodeSelector`, có `resources`, có `sync-wave`, không `latest`.
+
+---
+
+## 7. GitOps
+
+### AppProject — 2 cái
+
+| Project | Namespace đích | `clusterResourceWhitelist` |
 |---|---|---|
-| **Traefik** | 2 replica, antiAffinity theo node, `nodeSelector: hnq.dev/edge` | Master chết → không còn ingress → 100% request lỗi |
-| **cloudflared** | **In-cluster** 2 replica (không phải systemd trên VPS) | Tunnel trên VPS → master chết là mất đường vào |
-| **CoreDNS** | 2 replica + antiAffinity | Pod không phân giải được `*.svc.cluster.local` |
+| **app** | `*-dev`, `*-prod` | `[]` — chặn hoàn toàn ClusterRole, CRD… |
+| **platform** | `*` | `[{group: "*", kind: "*"}]` |
 
-Kết quả khi `hnq-01` chết hoàn toàn:
+### ApplicationSet — `gitops/bootstrap/appset-apps.yaml`
 
-- ✅ Cloudflare → tunnel (máy nhà) → Traefik (máy nhà) → pod (máy nhà): **traffic không đứt**
-- ❌ Không `kubectl`, không sync, không tạo pod mới, không cấp chứng chỉ mới
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  syncPolicy:
+    applicationsSync: create-update        # D15 — generator hỏng không xoá được Application
+    preserveResourcesOnDeletion: true
+  generators:
+    - matrix:
+        generators:
+          - git:
+              repoURL: &repo https://github.com/hunho247/HNQ-Infra.git
+              revision: main
+              files: [{ path: "registry/apps/*/service.yaml" }]
+          - list:
+              elements: []                 # bắt buộc để trống trước elementsYaml
+              elementsYaml: "{{ .spec.environments | toJson }}"
+  template:
+    metadata:
+      name: "{{ .metadata.name }}-{{ .env }}"
+    spec:
+      project: "{{ .spec.category }}"
+      source:
+        repoURL: *repo
+        targetRevision: main
+        path: "charts/{{ .spec.chart }}"
+        helm:
+          releaseName: "{{ .metadata.name }}"
+          valueFiles:                      # "/" = tính từ gốc repo
+            - values.yaml
+            - "/env/{{ .env }}.yaml"
+            - "/registry/apps/{{ .metadata.name }}/values-{{ .env }}.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{ .metadata.name }}-{{ .env }}"
+      syncPolicy:
+        automated:
+          selfHeal: true
+          prune: {{ if eq .env "dev" }}true{{ else }}false{{ end }}
+        syncOptions: [CreateNamespace=true, PruneLast=true, ServerSideApply=true]
+        retry: { limit: 5, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+```
 
-Nghĩa là mất master là **việc xử lý trong ngày, không phải việc thức đêm**.
+> `elements: []` đứng trước `elementsYaml` là workaround đã biết của tổ hợp matrix + git file generator — bỏ đi thì generator im lặng không sinh gì.
 
-### 3.2. Đường phục hồi đã diễn tập
+### 7 Application tường minh cho chart bên thứ ba
 
-Toàn bộ ở [RECOVERY.md](./RECOVERY.md). Mục tiêu:
+`gitops/bootstrap/platform/`, mỗi file ~20 dòng, **pin version tuyệt đối**, Renovate tự mở PR:
+
+| Application | Wave | Chạy ở |
+|---|---|---|
+| `sealed-secrets` | -3 | hnq-01 |
+| `local-path-provisioner` | -3 | hnq-01 (controller) |
+| `cert-manager` + ClusterIssuer | -2 | hnq-01 |
+| `traefik-config` (HelmChartConfig) | -1 | — |
+| `cloudflared` | 0 | edge |
+| `kube-prometheus-stack` | 1 | hnq-03 |
+| `velero` | 1 | hnq-01 server + node-agent ở 2 máy nhà |
+| `system-upgrade-controller` | 2 | hnq-01 |
+
+### Bootstrap — lệnh duy nhất trong đời cluster
+
+```bash
+helm install argocd argo/argo-cd -n argocd --create-namespace -f gitops/install/argocd-values.yaml
+kubectl -n argocd apply -f gitops/root.yaml
+```
+
+`gitops/install/argocd-values.yaml` tối thiểu:
+
+```yaml
+configs:
+  cm:   { admin.enabled: "true", timeout.reconciliation: 180s }
+  rbac: { policy.default: "" }              # deny-by-default
+server:
+  ingress: { enabled: false }               # ⚠️ KHÔNG BAO GIỜ lộ ra internet
+redis-ha: { enabled: false }
+global:
+  nodeSelector: { hnq.dev/role: control-plane }
+  tolerations:
+    - { key: hnq.dev/dedicated, operator: Equal, value: control-plane, effect: NoSchedule }
+```
+
+---
+
+## 8. Lưu trữ
+
+### local-path-provisioner tự quản (D11)
+
+`gitops/bootstrap/platform/local-path-provisioner.yaml` → chart `rancher/local-path-provisioner`, values:
+
+```yaml
+storageClass:
+  create: false                    # không tạo class mặc định
+storageClassConfigs:
+  hnq-local:
+    storageClass:
+      create: true
+      defaultClass: true
+      defaultVolumeType: local     # ⚠️ BẮT BUỘC — Velero KHÔNG backup được hostPath
+      reclaimPolicy: Retain        # D8 — xoá PVC không mất dữ liệu
+      volumeBindingMode: WaitForFirstConsumer
+      pathPattern: "{{ .PVC.Namespace }}-{{ .PVC.Name }}"
+      permPattern: '0777'          # tránh lỗi 755 của StorageClass phụ
+    nodePathMap:
+      - node: hnq-02
+        paths: ["/srv/k3s/data"]
+      - node: hnq-03
+        paths: ["/srv/k3s/data"]
+      - node: hnq-01
+        paths: []                  # từ chối cấp volume trên master
+nodeSelector: { hnq.dev/role: control-plane }
+tolerations:
+  - { key: hnq.dev/dedicated, operator: Equal, value: control-plane, effect: NoSchedule }
+```
+
+**Không viết PV bằng tay.** Lúc node prod chết ([R4](./RECOVERY.md#r4--node-prod-chết)), PV viết tay thêm một bước sửa path lúc đang gấp; với provisioner thì PVC tạo lại là volume tự sinh trên node mới.
+
+---
+
+## 9. Backup
+
+| Lớp | Cái gì | Đi đâu | Tần suất | Mất tối đa |
+|---|---|---|---|---|
+| **1 · etcd snapshot** | Toàn bộ trạng thái k8s | R2 (`etcd-s3-config-secret`) | 6 giờ | 6 giờ |
+| **2a · Velero FSB** | Dữ liệu trong PV | R2 | prod 1 ngày, giữ 30 ngày | 24 giờ |
+| **2b · Dump database** | `mysqldump` / `pg_dump` từng DB | `/srv/k3s/dump/` → R2 | **1 giờ** | **1 giờ** |
+| **3 · Git** | Toàn bộ cấu hình | GitHub | mỗi commit | 0 |
+
+Không để backup trong cluster (không dùng MinIO của chính cluster).
+
+### Velero values (D17)
+
+```yaml
+credentials: { existingSecret: velero-r2 }
+configuration:
+  uploaderType: kopia
+  defaultVolumesToFsBackup: true          # opt-out: backup hết, loại trừ bằng annotation
+  volumeSnapshotLocation: []              # local-path không có CSI snapshot
+  backupStorageLocation:
+    - name: r2
+      provider: aws
+      bucket: hnq-velero
+      config:
+        region: auto
+        s3Url: https://<account>.r2.cloudflarestorage.com
+        s3ForcePathStyle: "true"
+        checksumAlgorithm: ""             # ⚠️ bắt buộc với R2, thiếu là backup lỗi
+deployNodeAgent: true
+nodeAgent:
+  nodeSelector: { hnq.dev/storage: "true" }
+nodeSelector: { hnq.dev/role: control-plane }
+tolerations:
+  - { key: hnq.dev/dedicated, operator: Equal, value: control-plane, effect: NoSchedule }
+schedules:
+  prod-daily:
+    schedule: "0 2 * * *"
+    template: { ttl: 720h, includedNamespaces: ["*-prod"] }
+```
+
+Dev không có schedule — dựng lại từ Git.
+
+---
+
+## 10. Đường dữ liệu vào
+
+Mục tiêu: `hnq-01` chết thì **traffic khách hàng không đứt**. Cả 3 thành phần dưới đây đều 2 replica, `requiredDuringScheduling` antiAffinity theo `kubernetes.io/hostname`, `nodeSelector: hnq.dev/edge`.
+
+```
+Cloudflare → Tunnel → cloudflared (×2, máy nhà) → Traefik (×2, máy nhà) → pod (máy nhà)
+```
+
+### Traefik — `HelmChartConfig`
+
+```yaml
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata: { name: traefik, namespace: kube-system }
+spec:
+  valuesContent: |-
+    service:
+      type: ClusterIP                     # D10 — không còn ServiceLB
+    deployment:
+      replicas: 2
+    nodeSelector:
+      hnq.dev/edge: "true"
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels: { app.kubernetes.io/name: traefik }
+    providers:
+      kubernetesIngress:
+        publishedService: { enabled: true }
+```
+
+### cloudflared — in-cluster, 2 replica
+
+Chuyển khỏi systemd trên VPS. Một rule catch-all (D18):
+
+```yaml
+ingress:
+  - service: https://traefik.kube-system.svc.cluster.local:443
+    originRequest:
+      noTLSVerify: true
+      httpHostHeader: ""                  # giữ Host gốc để Traefik route đúng
+```
+
+Token tunnel là SealedSecret. Cloudflare tự chia traffic giữa các replica và tự chuyển khi một replica mất.
+
+### CoreDNS
+
+`kubectl -n kube-system scale deploy coredns --replicas=2` — nằm trong `make bootstrap` và được `drift.sh` kiểm hằng tuần.
+
+### Nghiệm thu đường dữ liệu (cửa chặn của P3)
+
+```bash
+ssh hnq-01 'sudo systemctl stop k3s'      # 5 phút
+curl -sS -o /dev/null -w '%{http_code}\n' https://lotus-dev.l2cteam.work/healthz   # phải 200
+ssh hnq-01 'sudo systemctl start k3s'
+```
+
+---
+
+## 11. Secret
+
+### Sealed Secrets
+
+```bash
+kubectl create secret generic lotus-clinic-backend -n lotus-clinic-prod \
+  --from-literal=DB_PASSWORD='...' --dry-run=client -o yaml \
+| kubeseal --format yaml > secrets/prod/lotus-clinic/backend.yaml
+```
+
+### Recovery kit — **4 món** (D14 thêm món 4)
+
+| # | Món | Lấy ở đâu | Mất nó thì |
+|---|---|---|---|
+| 1 | etcd snapshot | R2 + 1 bản trên laptop | Không dựng lại được cluster |
+| 2 | k3s token | `/var/lib/rancher/k3s/server/token` | Snapshot vô dụng |
+| 3 | Sealing key của Sealed Secrets | `kubectl -n kube-system get secret -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml` | Mọi file trong `secrets/` thành vô nghĩa |
+| 4 | `encryption-config.json` | `/var/lib/rancher/k3s/server/cred/encryption-config.json` | Restore được cluster nhưng **không đọc được Secret nào** |
+
+Cả 4 vào password manager (2 nơi) + USB mã hoá, rồi `shred -u` bản tạm. Bật **emergency access** cho một người tin được — với 1 người vận hành, "cất 2 nơi" mà cả 2 chỉ mình bạn mở được thì vẫn là một điểm hỏng.
+
+`make kit-check` hằng tháng đối chiếu cả 4 (so bằng sha256, không so giá trị). Controller Sealed Secrets xoay key mỗi 30 ngày → backup lại hằng quý.
+
+### Secret `k3s-etcd-s3` (D13)
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata: { name: k3s-etcd-s3, namespace: kube-system }
+type: etcd.k3s.cattle.io/s3-config-secret
+stringData:
+  etcd-s3-endpoint: "<account>.r2.cloudflarestorage.com"
+  etcd-s3-bucket: "hnq-etcd-snapshots"
+  etcd-s3-region: "auto"
+  etcd-s3-access-key: "..."
+  etcd-s3-secret-key: "..."
+```
+
+Commit dưới dạng SealedSecret. Khi restore trên máy mới ([R6](./RECOVERY.md#r6--vps-mất-hoàn-toàn)) thì truyền thẳng bằng cờ CLI lấy từ recovery kit — lúc đó chưa có cluster để đọc Secret.
+
+---
+
+## 12. Giám sát
+
+Monitoring đặt ở `hnq-03`: ở master thì mất master là mất luôn khả năng biết; ở node prod thì node prod chết là mất monitoring đúng lúc cần nó nhất.
+
+### Tám alert — tắt hết alert mặc định còn lại của kube-prometheus-stack
+
+| # | Alert | Ngưỡng |
+|---|---|---|
+| 1 | Node NotReady | > 5 phút |
+| 2 | **Đường dữ liệu suy giảm** — Traefik/cloudflared/CoreDNS < 2 pod Ready, hoặc 2 pod cùng một node | > 10 phút |
+| 3 | Đĩa node | > 80% |
+| 4 | PVC | > 85% |
+| 5 | Pod `*-prod` CrashLoop hoặc không Ready | > 15 phút |
+| 6 | **Backup quá hạn** — etcd > 12h, dump > 2h, Velero > 26h | ngay |
+| 7 | Certificate hết hạn | < 14 ngày |
+| 8 | **Dead man's switch** (Watchdog → healthchecks.io) | thiếu ping 12 phút |
+
+Mỗi alert phải có trường `action` ghi việc cần làm. Alert đi tới điện thoại, ở kênh riêng không lẫn chat thường.
+
+ArgoCD OutOfSync **không** phải alert gọi đêm — nằm trong `make drift` hằng tuần.
+
+---
+
+## 13. CI
+
+Một workflow `.github/workflows/validate.yml` chạy trên mọi PR:
+
+```
+yamllint → JSON Schema (service.yaml) → helm lint + helm-unittest
+        → check-secrets.sh → render-all.sh → kubeconform → conftest
+        → gitleaks + trivy
+```
+
+`render-all.sh` render **mọi service × mọi môi trường** rồi kiểm — ApplicationSet sinh sai tên hay values thiếu trường đều bị bắt trước khi vào `main`.
+
+### Policy `ci/policy/*.rego`
+
+| Rule | Ngăn được |
+|---|---|
+| Mọi container có `resources.limits` + `requests` | Một pod ăn hết CPU node |
+| Cấm `image: *:latest`, tag phải khớp `^[0-9a-f]{7}$` | Không tái tạo được → không quay lui được |
+| Bắt buộc `readinessProbe` | Traffic vào pod chưa sẵn sàng |
+| Cấm `hostNetwork`, `privileged`, `hostPath` | Thoát container; và `hostPath` thì Velero không backup được |
+| Ingress phải có `cert-manager.io/cluster-issuer` | Domain chạy không TLS |
+| Mọi workload khai `nodeSelector` | Pod rơi nhầm môi trường |
+| Mọi PVC dùng `storageClassName: hnq-local` | Rơi về class khác, mất `Retain` |
+| **Chỉ 5 chart platform ở [§2](#2-topology-và-cấu-hình-node) được khai toleration `hnq.dev/dedicated`** | Workload lách taint lên master |
+| Mọi `Application`/`Chart.yaml` pin version tuyệt đối | Sync ra phiên bản khác lần trước |
+
+### Branch protection
+
+| Thiết lập | Giá trị |
+|---|---|
+| Require pull request | ✅ |
+| **Require approvals** | **0** — GitHub không cho tự approve PR của mình |
+| Require status checks | ✅ — đây là cửa duyệt duy nhất |
+| Force push / xoá `main` | ❌ |
+| Admin bypass | ✅ — đường break-glass; mỗi lần dùng ghi 1 dòng vào `RUNBOOK.md` |
+
+`CODEOWNERS` dùng để **nhắc dừng lại 10 giây** khi PR đụng `values-prod.yaml`, `env/prod.yaml`, `gitops/`, `charts/`, `secrets/prod/`.
+
+---
+
+## 14. Promotion dev → prod
+
+```text
+registry/apps/lotus-clinic/values-dev.yaml    → tag: 7bcd123   (mới, đang test)
+registry/apps/lotus-clinic/values-prod.yaml   → tag: f1eb557   (ổn định)
+```
+
+| Môi trường | Luồng |
+|---|---|
+| **Dev** | push code → CI build ghcr → CI mở PR đổi `image.tag` → CI xanh → tự merge → ArgoCD sync |
+| **Prod** | `make promote NAME=lotus-clinic` → 3 cửa → PR → đọc diff → merge → sync |
+
+`ci/scripts/promote.sh` chạy trên máy có quyền vào cluster nên kiểm được thứ CI trên GitHub không thấy:
+
+```bash
+# 1. dev phải Synced + Healthy
+[ "$SYNC/$HEALTH" = "Synced/Healthy" ] || exit 1
+# 2. pod dev sống liên tục ≥ 30 phút và 0 restart
+[ "$AGE_MIN" -ge 30 ] && [ "$RESTARTS" -eq 0 ] || echo "⚠️ dùng --force nếu chắc"
+# 3. commit ghi rõ đường quay lui
+git commit -m "release($SVC): prod $CUR → $TAG
+
+Quay lui: git revert <commit này> → prod về $CUR
+dev đã chạy $TAG liên tục ${AGE_MIN} phút, 0 restart."
+```
+
+---
+
+## 15. Nâng cấp
+
+| Thứ | Cách |
+|---|---|
+| **k3s** | `system-upgrade-controller`, 2 Plan (server → agent), `concurrency: 1`. Nâng cấp = PR đổi một dòng version |
+| **Chart bên thứ ba** | Renovate mở PR, duyệt hằng tuần |
+| **Image ứng dụng** | Luồng promotion ở [§14](#14-promotion-dev--prod) |
+
+⚠️ `concurrency: 1` bắt buộc: nâng cả 2 máy nhà cùng lúc = cả 2 replica Traefik và cloudflared cùng xuống = mất toàn bộ traffic.
+
+---
+
+## 16. Lộ trình
+
+Đơn vị là **ngày công của 1 người** (~26 ngày công). Mỗi phase xong khi **toàn bộ DoD** đúng.
+
+| Phase | Việc | Ngày | Definition of Done |
+|---|---|---|---|
+| **P0** · Cluster + đường lùi | 3 node, nhãn, taint, `disable`, thư mục đĩa · `secrets-encryption` · etcd snapshot → R2 · recovery kit 4 món · **diễn tập restore lúc cluster còn trống** | 4 | `kubectl get node` đủ 3, `hnq-01` có taint · MTU đúng (`ping -M do -s 1400` giữa 2 node **phải lỗi**) · `tailscale ping` là `direct` · snapshot có mặt trên R2 · `make kit-check` xanh · đã restore etcd thành công 1 lần, có số phút ghi lại |
+| **P1** · GitOps nền | ArgoCD + sealed-secrets + `root.yaml` · CI + Renovate + branch protection | 3 | `gitops/root.yaml` apply 1 lần dựng được toàn bộ · `kubectl -n argocd get ingress` **trống** · PR sai policy bị CI chặn thật · sealing key + encryption-config đã vào kit |
+| **P2** · Chart | `hnq-common` + unittest · `webservice` + `datastore` + schema + sync-wave | 4 | `helm unittest` xanh · `render-all.sh` render đủ mọi service × env · chart thiếu `nodeSelector`/`resources` thì **fail template**, không chỉ cảnh báo |
+| **P3** · Đường dữ liệu | local-path-provisioner · Traefik ×2 · cloudflared in-cluster ×2 · CoreDNS ×2 · cert-manager + issuer | 2 | 🚧 **`systemctl stop k3s` trên `hnq-01` 5 phút mà domain public vẫn trả 200** · không còn `cloudflared` systemd trên VPS · PVC thử nghiệm bound vào `/srv/k3s/data` với `volumeType: local` |
+| **P4** · Service ở dev | 5 storage + push-notify · 4 clinic + outline | 4 | Mọi Application dev `Synced/Healthy` · không pod nào nằm trên `hnq-01` |
+| **P5** · Lưới an toàn | Velero → R2 · dump hằng giờ · monitoring + 8 alert + dead man's switch | 4 | Velero backup prod **restore thử thành công 1 lần** · dump có mặt trên R2 · tắt Alertmanager thì điện thoại có thông báo trong 12 phút |
+| **P6** · Prod | Bật prod từng service · `promote.sh` · **diễn tập dời node prod** · `RUNBOOK.md` + `BREAK_GLASS.md` | 3 | Đã dời prod sang node khác thành công 1 lần, có số phút · `BREAK_GLASS.md` đã có người khác đọc 1 lần · người đó truy cập được recovery kit |
+| **P7** · Tuỳ chọn | `make new-service` · `status.sh` · system-upgrade-controller | 2 | Nâng k3s là PR đổi một dòng |
+
+### 🚧 Hai cửa chặn
+
+> **Cửa 1 — không đi tiếp P1 trước khi P0 xong.** Diễn tập restore lúc cluster còn trống là lúc rẻ nhất trong cả đời cluster: sai thì `k3s-uninstall.sh` rồi làm lại.
+>
+> **Cửa 2 — không bật prod (P6) trước khi P5 xong.** Không có Velero + dump hằng giờ thì service prod không có đường lùi.
+
+### Mục tiêu phục hồi (số phải đo được sau P6)
 
 | Sự cố | Phục hồi trong | Mất dữ liệu tối đa |
 |---|---|---|
@@ -110,435 +685,3 @@ Toàn bộ ở [RECOVERY.md](./RECOVERY.md). Mục tiêu:
 | etcd hỏng (VPS còn) | 10 phút | 6 giờ |
 | VPS mất hẳn | 45 phút | 6 giờ |
 | Mất cả 3 máy | 3 giờ | 1 giờ |
-
----
-
-## 4. Tám quyết định nền tảng
-
-| # | Quyết định | Lý do gọn |
-|---|---|---|
-| **Q1** | 1 branch `main`, môi trường tách bằng file values | Promote được từng service một |
-| **Q2** | Mọi thay đổi qua PR, nhưng **CI là cửa duyệt, không phải người** | 1 người thì GitHub không cho tự approve PR của mình. PR vẫn giữ vì cho 3 thứ: diff để đọc lại, lịch sử, và 1 commit để `git revert`. |
-| **Q3** | ApplicationSet cho service mình, Application tường minh cho chart bên thứ ba | Factory cho cái lặp, danh sách cho cái cố định |
-| **Q4** | Sealed Secrets | Không cần hệ thống ngoài |
-| **Q5** | Prod `selfHeal: true` + `prune: false`; dev cả hai `true` | `selfHeal` chống sửa tay. `prune: false` để 1 lỗi ApplicationSet không xoá hàng loạt. |
-| **Q6** | Node chọn bằng **label boolean**, không bằng hostname | `kubectl label node hnq-03 hnq.dev/env-prod=true` = **dời cả môi trường prod**, không đụng dev. Đây là bước 1 của [R4](./RECOVERY.md#r4--node-prod-chết). |
-| **Q7** | Không xây web UI/API riêng | ArgoCD UI + k9s + script đã phủ hết |
-| **Q8** | **Mọi thay đổi phải quay lui được trong vài phút** | Cụ thể: image tag ghim SHA (cấm `latest`), `prune: false` ở prod, `Retain` cho mọi PV, snapshot trước việc nguy hiểm |
-
----
-
-## 5. Cấu trúc repo
-
-```text
-HNQ-Infra/                     (branch main duy nhất)
-│
-├── registry/apps/       ⭐ NƠI DUY NHẤT sửa khi thêm service
-│   ├── lotus-clinic/
-│   │   ├── service.yaml        # chart nào, bật env nào, cần secret gì
-│   │   ├── values-dev.yaml     # chỉ ghi phần KHÁC mặc định (~10 dòng)
-│   │   ├── values-prod.yaml
-│   │   └── config/
-│   └── … (4 clinic, push-notify, 5 storage, outline, cloudflared)
-│
-├── charts/              ⭐ Hiếm khi sửa — 3 chart cho toàn hệ thống
-│   ├── hnq-common/             # library chart: labels, probes, ingress, sync-wave
-│   ├── webservice/             # mọi HTTP service
-│   └── datastore/              # mọi database một node
-│
-├── env/{dev,prod}.yaml  ⭐ Khác biệt dev ↔ prod
-│
-├── gitops/
-│   ├── root.yaml               # ⭐ FILE DUY NHẤT apply tay, đúng 1 lần
-│   └── bootstrap/              # 2 AppProject + ApplicationSet + 5 chart bên thứ ba
-│
-├── secrets/{dev,prod}/         # SealedSecret đã mã hoá — an toàn để commit
-│
-├── ci/{policy,scripts}/        # Rego + new-service.sh, render-all.sh, promote.sh
-│
-├── scripts/
-│   ├── status.sh  drift.sh  backup/
-│   └── dr/              ⭐ NƠI ĐI TỚI KHI ĐANG SỰ CỐ
-│       ├── kit-check.sh        restore-etcd.sh
-│       ├── rebuild-master.sh   failover-prod.sh   restore-db.sh
-│
-├── .github/{workflows,CODEOWNERS,renovate.json}
-├── docs/
-└── Makefile
-```
-
-### Thêm 1 service mới tốn gì
-
-```bash
-make new-service NAME=abc-clinic CHART=webservice
-# → tạo registry/apps/abc-clinic/{service,values-dev,values-prod}.yaml
-# → commit, mở PR, CI xanh, merge
-```
-
-**Không phải viết file ArgoCD nào** — ApplicationSet tự phát hiện sau khi merge.
-
----
-
-## 6. Cách ApplicationSet hoạt động
-
-### File khai báo service
-
-`registry/apps/lotus-clinic/service.yaml` — toàn bộ những gì ArgoCD cần biết:
-
-```yaml
-apiVersion: hnq.dev/v1
-kind: ServiceRelease
-metadata:
-  name: lotus-clinic
-  owner: hunho247
-spec:
-  category: app                  # app | platform → quyết định AppProject
-  chart: webservice              # webservice | datastore
-  environments:                  # chưa có "prod" → chưa có Application prod
-    - env: dev
-    - env: prod
-  requiredSecrets:               # tên secret, KHÔNG phải giá trị — CI dùng để kiểm thiếu sót
-    - name: lotus-clinic-backend
-      keys: [DB_PASSWORD, JWT_SECRET]
-```
-
-`values-dev.yaml` chỉ ghi phần khác mặc định:
-
-```yaml
-image: { repository: ghcr.io/hnq-tech/lotus-backend, tag: 6aebe241 }
-ingress: { host: lotus-dev.l2cteam.work }
-app: { configFile: config/config_dev.yaml, secretName: lotus-clinic-backend }
-```
-
-Mọi thứ khác — port, probe, resources, nodeSelector, issuer, imagePullSecrets, serviceMonitor, storageClass — đến từ `env/dev.yaml` và `charts/webservice/values.yaml`. Namespace suy ra theo quy ước `<tên>-<env>`, không phải khai.
-
-### Một ApplicationSet thay cho 24 file Application
-
-```yaml
-# gitops/bootstrap/appset-apps.yaml  (rút gọn — phần quan trọng)
-spec:
-  goTemplate: true
-  generators:
-    - matrix:
-        generators:
-          - git:                                  # (1) quét mọi file khai báo
-              repoURL: &repo https://github.com/hunho247/HNQ-Infra.git
-              revision: main
-              files: [{ path: "registry/apps/*/service.yaml" }]
-          - list:                                 # (2) bung theo env khai trong chính file đó
-              elementsYaml: "{{ toJson .spec.environments }}"
-  template:
-    metadata:
-      name: "{{ .metadata.name }}-{{ .env }}"
-    spec:
-      project: "{{ .spec.category }}"             # app | platform
-      source:
-        repoURL: *repo
-        targetRevision: main
-        path: "charts/{{ .spec.chart }}"
-        helm:
-          releaseName: "{{ .metadata.name }}"
-          valueFiles:                             # "/" = tính từ gốc repo
-            - values.yaml
-            - "/env/{{ .env }}.yaml"
-            - "/registry/apps/{{ .metadata.name }}/values-{{ .env }}.yaml"
-      destination:
-        namespace: "{{ .metadata.name }}-{{ .env }}"
-      syncPolicy:
-        automated:
-          selfHeal: true
-          prune: {{ if eq .env "dev" }}true{{ else }}false{{ end }}   # Q5
-        syncOptions: [CreateNamespace=true, PruneLast=true, ServerSideApply=true]
-```
-
-Vì chỉ có **một branch**, `targetRevision: main` ghi cứng được — không phải bọc ApplicationSet trong Helm chart. Đây là lợi ích lớn nhất của Q1.
-
-### Chart bên thứ ba dùng Application tường minh
-
-`cert-manager`, `sealed-secrets`, `kube-prometheus-stack`, `velero`, `traefik-config` — 5 file, mỗi cái ~20 dòng, thay đổi vài tháng một lần, Renovate tự mở PR nâng version.
-
-### Bootstrap — một lệnh duy nhất trong đời cluster
-
-```bash
-kubectl -n argocd apply -f gitops/root.yaml   # Application trỏ vào gitops/bootstrap, recurse
-```
-
-Xong. Mọi thứ còn lại tự dựng.
-
----
-
-## 7. Lưu trữ
-
-### StorageClass `hnq-local`
-
-k3s có sẵn `local-path-provisioner`, nhưng StorageClass mặc định dùng `reclaimPolicy: Delete` — **xoá PVC là mất dữ liệu**. Khai thêm một StorageClass dùng chung provisioner đó nhưng `Retain`:
-
-```yaml
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata: { name: hnq-local }
-provisioner: rancher.io/local-path
-reclaimPolicy: Retain                 # Q8 — xoá PVC KHÔNG mất dữ liệu
-volumeBindingMode: WaitForFirstConsumer
-```
-
-`env/*.yaml` khai `persistence.storageClass: hnq-local` nên không service nào phải tự nhớ; CI có policy chặn nếu khai sai.
-
-> **Không dùng PV viết tay.** Lúc node prod chết, PV viết tay thêm một bước *"viết 5 file PV trỏ sang node mới rồi apply"* — làm lúc đang gấp và rất dễ gõ sai path. Với `local-path` thì PVC được tạo lại là provisioner tự cấp volume trên node mới.
-
-### Đường dẫn
-
-```text
-/srv/k3s/data/       ← local-path cấp volume ở đây
-/srv/k3s/dump/       ← dump database hằng giờ
-/srv/k3s/snapshots/  ← etcd snapshot (chỉ hnq-01)
-```
-
-Đặt trên partition riêng nếu được — để một service ghi log vô hạn không kéo etcd chết theo.
-
-### Không dùng Longhorn
-
-Longhorn cho phép node prod chết thì pod tự chạy lại chỗ khác. Nhưng: master là VPS ở xa nối qua WAN, và replication khối qua WAN thì chậm và dễ gây ra chính sự cố nó định phòng. Quan trọng hơn — **khi Longhorn hỏng, một người sửa nó lâu hơn restore từ dump.** Nó tăng MTBF nhưng tăng cả MTTR, ngược mục tiêu.
-
-Xét lại khi: có máy nhà thứ ba chung LAN **và** có người thứ hai biết vận hành nó.
-
-### Backup — 4 lớp
-
-| Lớp | Cái gì | Đi đâu | Tần suất | Mất tối đa |
-|---|---|---|---|---|
-| **1 · etcd snapshot** | Toàn bộ trạng thái k8s | **Cloudflare R2** | 6 giờ | 6 giờ |
-| **2a · Velero** | Dữ liệu trong PV | **R2 trực tiếp** | prod 1 ngày | 24 giờ |
-| **2b · Dump database** | `mysqldump` / `pg_dump` từng DB | `/srv/k3s/dump/` → R2 | **1 giờ** | **1 giờ** |
-| **3 · Git** | Toàn bộ cấu hình | GitHub | mỗi commit | 0 |
-
-Hai điểm quan trọng:
-
-- **Không để backup trong cluster.** Cluster chết là mất luôn backup. R2 không thu phí egress nên lúc restore không phải tính tiền.
-- **Lớp 2b là lớp dùng nhiều nhất.** Sự cố thật thường không phải "node cháy" mà là *"vừa chạy sai một câu UPDATE"*. Restore cả PV 50 GB để lấy lại một bảng là chậm hơn hàng chục lần một `mysqldump` 200 MB.
-
----
-
-## 8. Môi trường và promotion
-
-Dev và prod khác nhau bằng file values, tag luôn là SHA:
-
-```text
-registry/apps/lotus-clinic/values-dev.yaml    → tag: 7bcd1234   (mới, đang test)
-registry/apps/lotus-clinic/values-prod.yaml   → tag: f1eb557d   (ổn định)
-```
-
-| Môi trường | Luồng |
-|---|---|
-| **Dev** | push code → CI build ghcr → CI mở PR đổi `image.tag` → CI xanh → **tự merge** → ArgoCD sync |
-| **Prod** | `make promote NAME=lotus-clinic` → script kiểm 3 cửa → mở PR → bạn đọc diff → merge → sync |
-
-### Branch protection — khác chỗ này vì chỉ có 1 người
-
-| Thiết lập | Giá trị | Vì sao |
-|---|---|---|
-| Require pull request | ✅ Bật | Giữ |
-| **Require approvals** | **0** | GitHub **không cho tự approve PR của mình** → bật lên là tự khoá mình ra khỏi repo |
-| **Require status checks** | ✅ Bật | **Đây là cửa duyệt duy nhất** — nên CI phải nghiêm |
-| Force push / xoá `main` | ❌ Chặn | Giữ |
-| Cho admin bypass | ✅ Cho | Cần đường break-glass khi CI hỏng mà prod đang đỏ. Mỗi lần bypass ghi 1 dòng vào `RUNBOOK`. |
-
-`CODEOWNERS` giữ lại nhưng đổi mục đích — từ "bắt buộc duyệt" thành "nhắc mình dừng lại 10 giây" khi PR đụng `values-prod.yaml`, `env/prod.yaml`, `gitops/`, `charts/`, `secrets/prod/`.
-
-### `promote.sh` — 3 cửa duyệt thay cho người thứ hai
-
-Script chạy trên máy bạn (máy có quyền vào cluster) nên **kiểm được thứ CI trên GitHub không thấy**:
-
-```bash
-# 1. dev phải Synced + Healthy
-[ "$SYNC/$HEALTH" = "Synced/Healthy" ] || exit 1
-
-# 2. pod dev phải sống liên tục ≥ 30 phút và 0 restart
-[ "$AGE_MIN" -ge 30 ] && [ "$RESTARTS" -eq 0 ] || echo "⚠️ dùng --force nếu chắc"
-
-# 3. commit ghi rõ đường quay lui
-git commit -m "release($SVC): prod $CUR → $TAG
-
-Quay lui: git revert <commit này> → prod về $CUR
-dev đã chạy $TAG liên tục ${AGE_MIN} phút, 0 restart."
-```
-
-Chặt hơn "đồng nghiệp bấm approve" — một người duyệt PR đổi tag không có cách nào biết pod ở dev có restart hay không.
-
----
-
-## 9. Secret
-
-**Sealed Secrets.** Mã hoá bằng public key của controller, commit vào Git an toàn, chỉ controller trong cluster giải được.
-
-```bash
-kubectl create secret generic lotus-clinic-backend -n lotus-clinic-prod \
-  --from-literal=DB_PASSWORD='...' --dry-run=client -o yaml \
-| kubeseal --format yaml > secrets/prod/lotus-clinic/backend.yaml
-
-git add secrets/prod/lotus-clinic/backend.yaml   # an toàn — đã mã hoá
-```
-
-**Ngay sau khi cài controller, backup sealing key:**
-
-```bash
-kubectl -n kube-system get secret \
-  -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml > ~/sealing-key.yaml
-# → password manager (2 nơi) + USB mã hoá, rồi: shred -u ~/sealing-key.yaml
-```
-
-⚠️ **Sealing key là món #3 của [recovery kit](./RECOVERY.md#recovery-kit).** Mất nó thì mọi file trong `secrets/` thành vô nghĩa.
-
-⚠️ **Với 1 người, "cất 2 nơi" chưa đủ** — cả 2 nơi đều chỉ mình bạn vào được. Bật **emergency access** (1Password / Bitwarden) cho một người bạn tin. Người đó không cần biết Kubernetes, chỉ cần mở được mục đó khi cần.
-
-Controller tự xoay key mỗi 30 ngày và giữ key cũ để giải secret đã seal → **đặt lịch backup lại hằng quý** (đã nằm trong [lịch vận hành](./OPERATIONS.md#lịch-vận-hành)).
-
-CI có `gitleaks` chặn secret thô lọt vào repo, và `check-secrets.sh` kiểm `requiredSecrets` trong registry đã có đủ file trong `secrets/<env>/` chưa.
-
----
-
-## 10. AppProject — 2 cái, không phải 6
-
-| Project | Dùng cho | `clusterResourceWhitelist` |
-|---|---|---|
-| **app** | Ứng dụng, namespace `*-dev` / `*-prod` | `[]` — **chặn hoàn toàn** ClusterRole, CRD… |
-| **platform** | Chart bên thứ ba, mọi namespace | `[{group: "*", kind: "*"}]` |
-
-Giá trị thật: một chart ứng dụng viết sai **không thể** tạo `ClusterRole` hay đụng vào `kube-system`.
-
-### ArgoCD — giữ `admin`, bỏ OIDC
-
-Với 1 người, Dex/GitHub OIDC thêm chuỗi phụ thuộc dài (ArgoCD → Dex → GitHub OAuth → GitHub org), mỗi mắt hỏng là **không đăng nhập được đúng lúc đang sự cố**. Đổi lại được danh tính theo người — thứ chỉ có nghĩa khi nhiều người.
-
-```yaml
-configs:
-  cm:   { admin.enabled: "true", timeout.reconciliation: 180s }
-  rbac: { policy.default: "" }      # deny-by-default
-server:
-  ingress: { enabled: false }       # ⚠️ KHÔNG BAO GIỜ lộ ra internet — chỉ vào qua tailnet
-redis-ha: { enabled: false }        # ArgoCD không có PV → restore etcd là nó trở lại nguyên trạng
-```
-
-Ba việc bắt buộc: đổi mật khẩu admin ngay sau khi cài (cất cùng recovery kit), `kubectl -n argocd get ingress` phải trống, và `policy.default: ""`.
-
----
-
-## 11. CI trên GitHub Actions
-
-Một workflow `validate.yml` chạy trên mọi PR:
-
-```text
-yamllint → JSON Schema (service.yaml) → helm lint + unittest
-        → check-secrets.sh → render-all.sh → kubeconform → conftest
-        → gitleaks + trivy
-```
-
-`render-all.sh` render **mọi service × mọi môi trường** rồi kiểm — nên một ApplicationSet sinh sai tên hoặc một values thiếu trường đều bị bắt trước khi vào `main`.
-
-### Policy bắt buộc (`ci/policy/`, viết bằng Rego)
-
-| Rule | Ngăn được |
-|---|---|
-| Mọi container có `resources.limits` + `requests` | Một pod ăn hết CPU node |
-| Cấm `image: *:latest` | Deploy không tái tạo được → không quay lui được (Q8) |
-| Bắt buộc `readinessProbe` | Traffic vào pod chưa sẵn sàng |
-| Cấm `hostNetwork`, `privileged` | Xung đột port, thoát container |
-| Ingress phải có `cert-manager.io/cluster-issuer` | Domain chạy không TLS |
-| **Mọi workload khai `nodeSelector`** | Pod rơi xuống `hnq-01` và tranh I/O với etcd |
-| **Mọi PVC dùng `storageClassName: hnq-local`** | Rơi về `local-path` mặc định (`Delete`) → xoá PVC là mất dữ liệu |
-
-Hai dòng cuối là đặc thù của topology này, không có trong bộ policy mẫu nào.
-
----
-
-## 12. Lộ trình
-
-Đơn vị là **ngày công của 1 người**, không phải tuần lịch. Tổng ~26 ngày công → làm 2–3 ngày/tuần thì khoảng **9–12 tuần**.
-
-| Phase | Nội dung | Ngày |
-|---|---|---|
-| **P0** · Cluster + đường lùi | 3 node + label + đường dẫn · etcd snapshot → R2 · recovery kit · **diễn tập restore lúc cluster còn trống** | 4 |
-| **P1** · GitOps nền | ArgoCD + sealed-secrets + `root.yaml` · CI + Renovate + branch protection | 3 |
-| **P2** · Chart | `hnq-common` + unittest · `webservice` + `datastore` + schema | 4 |
-| **P3** · Đường dữ liệu | Traefik ×2 + cloudflared in-cluster + CoreDNS ×2 · StorageClass | 2 |
-| **P4** · Service ở dev | 5 storage + push-notify · 4 clinic + outline | 4 |
-| **P5** · Lưới an toàn | Velero → R2 + dump hằng giờ · monitoring + 8 alert + **dead man's switch** | 4 |
-| **P6** · Prod | Bật prod từng service · promote · **diễn tập dời node prod** · `RUNBOOK` + `BREAK_GLASS` | 3 |
-| **P7** · Tuỳ chọn | `make new-service` · `status.sh` · system-upgrade-controller | 2 |
-
-### 🚧 Hai cửa chặn không được vượt
-
-> **Cửa 1 — không đi tiếp P1 trước khi P0 xong.** Diễn tập restore lúc cluster còn trống là lúc **rẻ nhất trong cả đời cluster**: sai thì `k3s-uninstall.sh` rồi làm lại, không mất gì. Bỏ qua đây là sẽ diễn tập lần đầu lúc đang có dữ liệu thật.
->
-> **Cửa 2 — không bật prod (P6) trước khi P5 xong.** Không có Velero + dump hằng giờ thì mọi service prod **không có đường lùi**. Đây là cửa quan trọng nhất của cả lộ trình.
-
-Danh sách việc chi tiết từng phase nằm ở [OPERATIONS.md §checklist](./OPERATIONS.md#checklist-triển-khai).
-
----
-
-## 13. Cố tình KHÔNG làm
-
-Mỗi dòng **đã cân nhắc và quyết định bỏ** vì với 1 người, nó tăng MTTR nhiều hơn giảm MTBF.
-
-| Không làm | Vì sao | Xét lại khi |
-|---|---|---|
-| **HA 3 server** | Quorum etcd qua WAN tệ hơn 1 server ([§3](#3-vì-sao-không-ha)) | Có 3 máy **chung LAN** + có SLA cam kết |
-| **Longhorn** | Khi nó hỏng, sửa lâu hơn restore ([§7](#7-lưu-trữ)) | Có máy thứ 3 chung LAN **và** người thứ hai biết vận hành |
-| **Dex / OIDC cho ArgoCD** | 4 phụ thuộc phải sống mới đăng nhập được ([§10](#argocd--giữ-admin-bỏ-oidc)) | Có người thứ hai |
-| **Tailscale K8s Operator** | Thêm một thành phần giữa bạn và apiserver | Có ≥ 3 người hoặc cần RBAC theo người |
-| **Require approvals trên PR** | GitHub không cho tự approve PR của mình | Ngay khi có người thứ hai |
-| **2 branch dev/prod** | Không promote chọn lọc được | Không bao giờ |
-| **`replicas: 2` cho app prod** | Cả 2 replica rơi cùng 1 node → không chống được gì, chỉ nhân đôi kết nối DB | Khi có 2 node cùng chạy prod |
-| **MinIO làm chỗ chứa backup** | Backup vào chính cluster là vòng lặp vô nghĩa | Không bao giờ |
-| **Kargo** | Ngưỡng hữu ích từ 3 môi trường | Khi thêm `staging` |
-| **Backstage / portal tự viết** | ArgoCD UI + k9s + script đã phủ hết | >10 đội, hoặc >25 service |
-| **Sync window, NetworkPolicy, ArgoCD HA, kube-score, Progressive Sync** | Chưa xứng quy mô | Xem [RESEARCH](./RESEARCH_BEST_PRACTICES.md) |
-| **External Secrets Operator** | Cần Vault hoặc cloud secret manager | Khi có cluster thứ hai |
-
-> Với 1 người, **cái không xây là cái không hỏng lúc 2 giờ sáng**.
-
----
-
-## 14. Rủi ro
-
-| Rủi ro | Mức | Cách giảm |
-|---|---|---|
-| **Người duy nhất không liên lạc được** | 🔴 | [§14.1](#141-rủi-ro-lớn-nhất-một-người) — bắt buộc, không phải "nên làm" |
-| **Mất k3s token** → snapshot etcd thành vô dụng | 🔴 | Trong [recovery kit](./RECOVERY.md#recovery-kit), `make kit-check` hằng tháng |
-| **Mất sealing key** | 🔴 | Backup ngay khi cài, 2 nơi + emergency access |
-| **Chưa diễn tập, tới lúc cần thì hỏng** | 🔴 | Diễn tập là **cửa chặn** của P0/P5/P6 |
-| **Mất điện / mất mạng ở nhà** | 🟠 | Điểm yếu thật của topology này. **UPS cho 2 máy là món rẻ nhất mua được thêm uptime.** Mạng single-ISP thì cân nhắc 4G dự phòng. |
-| VPS bị nhà cung cấp khoá | 🟠 | [R6](./RECOVERY.md#r6--vps-mất-hoàn-toàn) ≤ 45 phút; traffic không đứt trong lúc đó |
-| Node prod chết, dữ liệu local không truy cập được | 🟠 | Dump hằng giờ → mất tối đa 1 giờ. Diễn tập ở P6. |
-| MTU pod network sai qua Tailscale | 🟡 | Kiểm ngay ở P0 — triệu chứng rất khó đoán (request nhỏ chạy, request lớn treo) |
-| Tailnet sự cố → node `NotReady` | 🟡 | Container vẫn chạy; [R9](./RECOVERY.md#r9--tailnet-sự-cố) |
-
-### 14.1. Rủi ro lớn nhất: một người
-
-Với đội 3 người, rủi ro là *"chỉ một người hiểu hệ thống"*. Với 1 người thì đó **là single point of failure của cả hệ thống**, và không `ONBOARDING.md` nào chữa được. Ba việc tối thiểu, làm ở P6, mỗi việc dưới 1 giờ:
-
-**1. Một người thứ hai giữ được recovery kit.** Không cần biết Kubernetes — chỉ cần emergency access vào password manager, và biết rằng nó tồn tại.
-
-**2. `docs/BREAK_GLASS.md` — một trang cho người không biết k8s:**
-
-```markdown
-# Nếu không liên lạc được với người vận hành
-Hệ thống: 1 VPS (hnq-01, nhà cung cấp X, tài khoản Y) + 2 máy tại <địa chỉ>.
-Khách hàng đang dùng: <danh sách domain>.
-
-## KHÔNG được làm
-- Không tắt, không cài lại 2 máy ở nhà — dữ liệu khách hàng nằm ở đó.
-- Không xoá VPS. Nếu bị khoá vì chưa trả tiền: <cách trả>.
-
-## Nếu website khách hàng không truy cập được
-1. Kiểm 2 máy ở nhà còn điện và mạng không → nguyên nhân phổ biến nhất.
-2. Còn thì gọi <người vận hành>, hoặc <người kỹ thuật dự phòng: tên, sđt>.
-3. Recovery kit + mật khẩu: mục "HNQ recovery kit" trong <password manager>.
-
-## Toàn bộ hạ tầng mô tả trong Git
-github.com/hunho247/HNQ-Infra → docs/RECOVERY.md
-Người biết Kubernetes đọc file đó là dựng lại được từ số không.
-```
-
-**3. Hệ thống tự sống được vài ngày không ai chạm.** Đây là lý do thật của `selfHeal`, probe đúng, `Restart=always`, 2 replica đường dữ liệu, Renovate — và của [dead man's switch](./OPERATIONS.md#dead-mans-switch), thứ cho bạn biết hệ thống **đã** chết khi mọi cơ chế bên trong đã chết theo.
-
-> Thứ tự ưu tiên khi phải chọn: **tự chữa được > có runbook > chỉ mình biết.** Người phải debug thứ "thông minh mà chỉ mình hiểu" lúc 2 giờ sáng cũng là bạn — và lúc đó bạn không thông minh bằng bây giờ.

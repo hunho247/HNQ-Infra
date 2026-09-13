@@ -26,25 +26,31 @@ tailscale ip -4 && tailscale status      # ghi lại IP 100.x, 3 máy phải th�
 # /etc/rancher/k3s/config.yaml — tạo TRƯỚC khi cài
 cluster-init: true                 # ⚠️ embedded etcd, xem ghi chú dưới
 node-name: hnq-01
-node-label:
-  - "hnq.dev/role=control-plane"
-  - "svccontroller.k3s.cattle.io/enablelb=true"    # svclb chỉ chạy ở đây
 node-ip: 100.x.y.z                 # IP Tailscale
 node-external-ip: <IP public VPS>
 flannel-iface: tailscale0          # ⚠️ pod network đi qua tailnet
+write-kubeconfig-mode: "600"       # mặc định k3s là 644 — ai trên máy đó cũng đọc được
+secrets-encryption: true           # ⚠️ mã hoá Secret trong etcd — snapshot rời khỏi máy
+
+node-label:
+  - "hnq.dev/role=control-plane"
+node-taint:
+  - "hnq.dev/dedicated=control-plane:NoSchedule"   # ⚠️ giữ workload khỏi master
+
+disable:
+  - servicelb                      # mọi traffic vào qua Cloudflare Tunnel
+  - local-storage                  # thay bằng chart local-path-provisioner tự quản
+
 tls-san:
   - 100.x.y.z
   - hnq-01.<tailnet>.ts.net        # ⚠️ tên này là chìa khoá để thay máy master nhanh
   - <IP public VPS>
-write-kubeconfig-mode: "600"       # mặc định k3s là 644 — ai trên máy đó cũng đọc được
 
 etcd-snapshot-schedule-cron: "0 */6 * * *"
 etcd-snapshot-retention: 20
+etcd-snapshot-dir: /srv/k3s/snapshots
 etcd-s3: true
-etcd-s3-endpoint: "<account>.r2.cloudflarestorage.com"
-etcd-s3-bucket: "hnq-etcd-snapshots"
-etcd-s3-access-key: "..."
-etcd-s3-secret-key: "..."
+etcd-s3-config-secret: k3s-etcd-s3   # khoá R2 nằm trong Secret ở kube-system, không để thô ở đây
 ```
 
 ```bash
@@ -52,7 +58,11 @@ curl -sfL https://get.k3s.io | sh -
 sudo cat /var/lib/rancher/k3s/server/token     # ⚠️ CẤT NGAY vào password manager
 ```
 
-⚠️ **Token này là món #2 của [recovery kit](./RECOVERY.md#recovery-kit).** Không có nó thì snapshot etcd không restore được lên máy mới.
+```bash
+sudo cat /var/lib/rancher/k3s/server/cred/encryption-config.json   # ⚠️ CẤT NGAY, cùng chỗ với token
+```
+
+⚠️ **Token là món #2 và `encryption-config.json` là món #4 của [recovery kit](./RECOVERY.md#recovery-kit).** Thiếu token thì snapshot etcd không restore được lên máy mới; thiếu encryption config thì restore được cluster nhưng **không đọc được Secret nào**.
 
 **Vì sao `cluster-init` (etcd) dù không định làm HA:** không phải để HA, mà vì etcd có sẵn snapshot theo lịch + upload S3 + `--cluster-reset-restore-path` có tài liệu chính thức. Với SQLite thì phải tự viết cron, tự viết upload, tự viết restore — và tự debug chúng lúc đang sự cố. Đổi SQLite → etcd sau này là **cài lại cluster**.
 
@@ -100,10 +110,14 @@ helm repo add argo https://argoproj.github.io/argo-helm
 helm install argocd argo/argo-cd -n argocd --create-namespace -f gitops/install/argocd-values.yaml
 kubectl -n argocd apply -f gitops/root.yaml    # ⭐ lệnh duy nhất apply tay trong đời cluster
 
+kubectl -n kube-system scale deploy coredns --replicas=2
+
 # Ngay sau khi Sealed Secrets lên:
 kubectl -n kube-system get secret -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml \
   > ~/sealing-key.yaml    # → password manager (2 nơi), rồi shred -u ~/sealing-key.yaml
 ```
+
+Sau bước này recovery kit phải đủ **4 món**: etcd snapshot · k3s token · sealing key · `encryption-config.json`.
 
 ### 6. 🚧 Diễn tập restore **ngay bây giờ**, khi cluster còn trống
 
@@ -117,17 +131,19 @@ ssh hnq-01 'sudo systemctl stop k3s && sudo rm -rf /var/lib/rancher/k3s/server/d
 
 ---
 
-## Add-on của k3s — cấu hình lại 4 trong 5
+## Add-on của k3s — giữ 3, tắt 2
 
-k3s cài sẵn Traefik, ServiceLB, local-path, metrics-server, CoreDNS. Giữ hết, nhưng:
+k3s cài sẵn Traefik, ServiceLB, local-path, metrics-server, CoreDNS.
 
-| Add-on | Phải cấu hình lại |
-|---|---|
-| **Traefik** | 2 replica + antiAffinity theo hostname + `nodeSelector: hnq.dev/edge` |
-| **CoreDNS** | 2 replica + antiAffinity, trên 2 máy ở nhà |
-| **ServiceLB** | Chỉ chạy trên `hnq-01` — gắn nhãn `svccontroller.k3s.cattle.io/enablelb` cho node được phép; khi có ít nhất 1 node mang nhãn thì chỉ node đó đủ điều kiện |
-| **local-path** | Thêm StorageClass `hnq-local` với `reclaimPolicy: Retain` ([PLAN §7](./PLAN.md#7-lưu-trữ)) |
-| metrics-server | Không cần sửa |
+| Add-on | Quyết định | Cách làm |
+|---|---|---|
+| **Traefik** | Giữ, cấu hình lại | `HelmChartConfig` trong `kube-system`: 2 replica + antiAffinity theo hostname + `nodeSelector: hnq.dev/edge` + `service.type: ClusterIP` |
+| **CoreDNS** | Giữ, scale 2 | `kubectl -n kube-system scale deploy coredns --replicas=2`. Manifest k3s **không khai `replicas`** nên scale không bị ghi đè khi k3s khởi động lại; taint của `hnq-01` đẩy pod xuống 2 máy nhà, `topologySpreadConstraints` có sẵn tách chúng ra 2 node |
+| **metrics-server** | Giữ nguyên | Tự chuyển xuống máy nhà do taint |
+| **ServiceLB** | **Tắt** (`disable: servicelb`) | Không có Service `LoadBalancer` nào — mọi traffic vào qua Cloudflare Tunnel |
+| **local-path** | **Tắt** (`disable: local-storage`) | Thay bằng chart `local-path-provisioner` tự quản, StorageClass `hnq-local` (`Retain`, `volumeType: local`, path `/srv/k3s/data`) — xem [PLAN §8](./PLAN.md#8-lưu-trữ) |
+
+⚠️ **Không sửa file trong `/var/lib/rancher/k3s/server/manifests/`** — k3s ghi đè lại mỗi lần khởi động. Chỉ dùng `disable:`, `HelmChartConfig`, hoặc trường không có trong manifest gốc.
 
 `requiredDuringScheduling` (không phải `preferred`) cho antiAffinity là có chủ ý: thà pod thứ hai `Pending` và thấy ngay, hơn là cả 2 replica âm thầm nằm chung một node rồi phát hiện lúc node đó chết.
 
@@ -418,7 +434,33 @@ kubectl get nodes && make drift && kubectl get pods -A | grep -v Running    # 5.
 
 Bốn dòng cuối là **đặc trưng của topology 3-node-qua-Tailscale** — không có trong runbook mẫu nào trên mạng, và đều là loại sự cố mất hàng giờ nếu gặp lần đầu mà không biết trước.
 
-> Chưa cần viết `ONBOARDING.md` — chưa có ai để onboard. Cái cần viết là tài liệu ngược lại: [`BREAK_GLASS.md`](./PLAN.md#141-rủi-ro-lớn-nhất-một-người), một trang cho người **không** biết Kubernetes.
+### `BREAK_GLASS.md` — viết ở P6
+
+Chưa cần `ONBOARDING.md` — chưa có ai để onboard. Cái cần viết là tài liệu ngược lại: một trang cho người **không** biết Kubernetes, dùng khi không liên lạc được với người vận hành. Mẫu:
+
+```markdown
+# Nếu không liên lạc được với người vận hành
+Hệ thống: 1 VPS (hnq-01, nhà cung cấp X, tài khoản Y) + 2 máy tại <địa chỉ>.
+Khách hàng đang dùng: <danh sách domain>.
+
+## KHÔNG được làm
+- Không tắt, không cài lại 2 máy ở nhà — dữ liệu khách hàng nằm ở đó.
+- Không xoá VPS. Nếu bị khoá vì chưa trả tiền: <cách trả>.
+
+## Nếu website khách hàng không truy cập được
+1. Kiểm 2 máy ở nhà còn điện và mạng không → nguyên nhân phổ biến nhất.
+2. Còn thì gọi <người vận hành>, hoặc <người kỹ thuật dự phòng: tên, sđt>.
+3. Recovery kit + mật khẩu: mục "HNQ recovery kit" trong <password manager>.
+
+## Toàn bộ hạ tầng mô tả trong Git
+github.com/hunho247/HNQ-Infra → docs/RECOVERY.md
+Người biết Kubernetes đọc file đó là dựng lại được từ số không.
+```
+
+Hai việc đi kèm, cùng ở P6:
+
+- **Một người thứ hai giữ được recovery kit** — không cần biết Kubernetes, chỉ cần emergency access vào password manager (1Password / Bitwarden) và biết rằng nó tồn tại.
+- **Một người khác đã đọc `BREAK_GLASS.md` một lần** — tài liệu chưa ai đọc là tài liệu chưa chắc dùng được.
 
 ---
 
@@ -441,7 +483,7 @@ Lịch phải **ngắn tới mức làm được cả lúc đang bận**. Mỗi 
 | **6 tháng** | Kiểm máy phụ còn dùng được | 15 ph | Máy phụ hết hạn âm thầm = không có máy phụ |
 | | Đăng nhập thử console nhà cung cấp VPS | 10 ph | Phát hiện 2FA đã đổi số đúng lúc đang sự cố |
 
-Tổng: **~25 phút mỗi tuần** + **nửa ngày mỗi quý**. Vượt nhiều thì có chỗ nào đó đang quá phức tạp so với nhu cầu — đọc lại [PLAN §13](./PLAN.md#13-cố-tình-không-làm).
+Tổng: **~25 phút mỗi tuần** + **nửa ngày mỗi quý**. Vượt nhiều thì có chỗ nào đó đang quá phức tạp so với nhu cầu — đọc lại [PLAN §1](./PLAN.md#1-bảng-quyết-định-đã-chốt).
 
 ---
 
@@ -449,6 +491,9 @@ Tổng: **~25 phút mỗi tuần** + **nửa ngày mỗi quý**. Vượt nhiều
 
 **Cluster (P0)**
 - [ ] Cài bằng `--cluster-init` — kiểm: `kubectl get node` thấy role `etcd` trên `hnq-01`
+- [ ] `hnq-01` có taint `hnq.dev/dedicated=control-plane:NoSchedule`
+- [ ] `servicelb` và `local-storage` đã tắt — `kubectl get sc` chỉ còn `hnq-local`
+- [ ] `secrets-encryption` bật — `k3s secrets-encrypt status` báo `Encryption Status: Enabled`
 - [ ] 3 node đúng nhãn, không values nào tham chiếu hostname
 - [ ] MTU đúng — `ping -M do -s 1400` giữa 2 node **phải lỗi**
 - [ ] `tailscale ping` giữa 3 node là **direct**, không qua DERP
@@ -458,6 +503,7 @@ Tổng: **~25 phút mỗi tuần** + **nửa ngày mỗi quý**. Vượt nhiều
 
 **Đường dữ liệu (P3)**
 - [ ] Traefik, cloudflared, CoreDNS: mỗi cái 2 pod, 2 node ở nhà khác nhau
+- [ ] PVC thử nghiệm bound vào `/srv/k3s/data`, PV là `volumeType: local` (Velero không backup được `hostPath`)
 - [ ] Đã thử `systemctl stop k3s` trên `hnq-01` 5 phút và domain public vẫn trả 200
 - [ ] Không còn `cloudflared` chạy bằng systemd trên VPS
 
@@ -473,7 +519,7 @@ Tổng: **~25 phút mỗi tuần** + **nửa ngày mỗi quý**. Vượt nhiều
 - [ ] ArgoCD chỉ báo khi thất bại
 
 **An toàn (P0/P5/P6)**
-- [ ] Recovery kit đủ **3 món**, `make kit-check` xanh
+- [ ] Recovery kit đủ **4 món**, `make kit-check` xanh
 - [ ] Đã restore thử etcd snapshot **một lần** ([R5](./RECOVERY.md#r5--etcd-hỏng-hoặc-apiserver-không-lên))
 - [ ] Đã dựng thử master mới từ snapshot **một lần** ([R6](./RECOVERY.md#r6--vps-mất-hoàn-toàn))
 - [ ] Đã restore thử một database từ dump **một lần** ([R7](./RECOVERY.md#r7--xoá-nhầm-dữ-liệu-trong-database))

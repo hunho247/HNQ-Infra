@@ -2,7 +2,9 @@
 
 > **Đây là hồ sơ tra cứu, không phải kế hoạch.** Kế hoạch đang dùng là [PLAN.md](./PLAN.md) — mọi quyết định ở đó đều lấy cơ sở từ tài liệu này.
 >
-> Tra cứu ngày 11/09/2026. Các cột *"Plan hiện tại"* trong tài liệu so với **bản nháp đầu tiên** (đội 3 người, chưa chốt topology) nên có chỗ đã lỗi thời — quyết định hiện hành luôn đọc ở [PLAN §13 Cố tình không làm](./PLAN.md#13-cố-tình-không-làm).
+> ⚠️ **Mọi câu hỏi "cần bạn quyết định" trong tài liệu này đã được chốt** ở [PLAN §1](./PLAN.md#1-bảng-quyết-định-đã-chốt). Nếu tài liệu này và PLAN nói khác nhau thì **PLAN đúng**.
+>
+> Tra cứu ngày 11/09/2026. Các cột *"Plan hiện tại"* trong tài liệu so với **bản nháp đầu tiên** (đội 3 người, chưa chốt topology) nên có chỗ đã lỗi thời — quyết định hiện hành luôn đọc ở [PLAN §1 Bảng quyết định đã chốt](./PLAN.md#1-bảng-quyết-định-đã-chốt).
 
 ## Bảy chỗ kế hoạch hiện tại đi khác tài liệu này — và vì sao
 
@@ -266,7 +268,7 @@ Tổng hợp từ [Red Hat](https://developers.redhat.com/articles/2022/09/07/ho
 > *"Most teams start with Sealed Secrets and graduate to ESO when they hit the multi-cluster or rotation wall."*
 > — [DevOpsBoys](https://devopsboys.com/blog/sops-vs-sealed-secrets-vs-external-secrets-gitops-2026)
 
-Quyết định chọn Sealed Secrets ([PLAN §9](./PLAN.md#9-secret)) **khớp chính xác** với khuyến nghị này. Và hạn chế của nó cũng đúng với những gì cộng đồng nêu:
+Quyết định chọn Sealed Secrets ([PLAN §11](./PLAN.md#11-secret)) **khớp chính xác** với khuyến nghị này. Và hạn chế của nó cũng đúng với những gì cộng đồng nêu:
 
 > *"The encryption/decryption mechanism is tied to the specific Kubernetes cluster, meaning migrating secrets between clusters can be a challenge."*
 

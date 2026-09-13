@@ -12,7 +12,7 @@
 
 Câu hỏi duy nhất trước khi gõ bất cứ lệnh nào: **khách hàng có đang bị ảnh hưởng không?**
 
-Vì [đường dữ liệu không phụ thuộc master](./PLAN.md#31-đường-dữ-liệu-không-phụ-thuộc-master), câu trả lời rất thường là **không** — và khi đó bạn có cả ngày, không phải 5 phút.
+Vì [đường dữ liệu không phụ thuộc master](./PLAN.md#10-đường-dữ-liệu-vào), câu trả lời rất thường là **không** — và khi đó bạn có cả ngày, không phải 5 phút.
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code}\n' https://lotus.l2cteam.work/healthz   # (1)
@@ -36,13 +36,14 @@ make drift                                                                      
 
 ## Recovery kit
 
-Mất cả 3 máy mà còn đủ 3 thứ này thì dựng lại được toàn bộ hệ thống. Thiếu một thứ là **mất vĩnh viễn** một phần.
+Mất cả 3 máy mà còn đủ 4 thứ này thì dựng lại được toàn bộ hệ thống. Thiếu một thứ là **mất vĩnh viễn** một phần.
 
 | # | Thứ | Lấy ở đâu | Cất ở đâu | Không có thì |
 |---|---|---|---|---|
 | 1 | **etcd snapshot** | tự động 6 giờ/lần lên R2 | R2 + 1 bản tải về máy hằng tháng | Mất toàn bộ trạng thái cluster |
 | 2 | **k3s server token** | `/var/lib/rancher/k3s/server/token` | **Password manager** | ⚠️ **Snapshot #1 thành vô dụng** — token là khoá giải bootstrap data trong snapshot |
 | 3 | **Sealing key** | `kubectl -n kube-system get secret -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml` | Password manager, **2 nơi** | Phải tạo lại **toàn bộ** secret bằng tay |
+| 4 | **`encryption-config.json`** | `/var/lib/rancher/k3s/server/cred/encryption-config.json` | Password manager, cùng mục với #2 | Restore được cluster nhưng **không đọc được Secret nào** — cụm lên mà mọi pod crash vì thiếu biến môi trường |
 
 Kèm theo (tiết kiệm nhiều thời gian): token Cloudflare Tunnel, khoá R2, mật khẩu admin ArgoCD, thông tin đăng nhập nhà cung cấp VPS.
 
@@ -53,11 +54,12 @@ Kèm theo (tiết kiệm nhiều thời gian): token Cloudflare Tunnel, khoá R2
 Kit chưa từng kiểm là kit chưa chắc có. Script không in ra giá trị, chỉ trả lời "còn dùng được không":
 
 ```bash
-# scripts/dr/kit-check.sh — kiểm 4 việc
+# scripts/dr/kit-check.sh — kiểm 5 việc
 # 1. snapshot mới nhất trên R2 ≤ 12 giờ tuổi
 # 2. token trong password manager khớp token trên server (so bằng sha256, không so giá trị)
 # 3. sealing key còn trong cluster + tự xác nhận password manager có 2 bản
-# 4. có bản etcd tải về máy dưới 35 ngày (quy tắc 3-2-1)
+# 4. encryption-config.json trong password manager khớp bản trên server (sha256)
+# 5. có bản etcd tải về máy dưới 35 ngày (quy tắc 3-2-1)
 ```
 
 ---
@@ -165,7 +167,7 @@ make snapshot                                                  # luôn luôn, tr
 kubectl label node hnq-03 hnq.dev/env-prod=true --overwrite     # hnq-03 giờ nhận CẢ dev LẪN prod
 ```
 
-Đây là lúc [Q6](./PLAN.md#4-tám-quyết-định-nền-tảng) trả hết tiền: **một lệnh dời cả môi trường**, không sửa file nào, không merge PR nào.
+Đây là lúc [chọn node bằng nhãn boolean](./PLAN.md#2-topology-và-cấu-hình-node) trả hết tiền: **một lệnh dời cả môi trường**, không sửa file nào, không merge PR nào.
 
 ### Bước 2 — nhường tài nguyên cho prod
 
@@ -283,7 +285,7 @@ Snapshot cũ hơn `main` vài giờ. ArgoCD tự kéo về đúng Git — ép n�
 
 **45 phút · mất tối đa 6 giờ. Khách hàng không bị ảnh hưởng trong lúc làm.**
 
-Cần recovery kit món **#1 (snapshot) và #2 (token)**. Không có #2 thì quy trình này không chạy được → phải đi [R8](#r8--mất-toàn-bộ-cluster).
+Cần recovery kit món **#1 (snapshot)**, **#2 (token)** và **#4 (`encryption-config.json`)**. Thiếu #2 thì quy trình này không chạy được; thiếu #4 thì cluster lên nhưng mọi Secret không đọc được → cả hai trường hợp đi [R8](#r8--mất-toàn-bộ-cluster).
 
 ```bash
 # Bước 0 — xác nhận bạn có thời gian
@@ -313,14 +315,24 @@ node-external-ip: <IP public MỚI>
 flannel-iface: tailscale0
 tls-san: [<IP Tailscale MỚI>, hnq-01.<tailnet>.ts.net, <IP public MỚI>]
 write-kubeconfig-mode: "600"
-# … phần etcd-s3 giống cấu hình cũ
+secrets-encryption: true
+disable: [servicelb, local-storage]
+# … phần etcd-snapshot / etcd-s3 giống cấu hình cũ, nhưng lúc RESTORE thì truyền khoá R2
+#   bằng cờ CLI lấy từ recovery kit — chưa có cluster để đọc etcd-s3-config-secret
 ```
 
 ```bash
 curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_START=true sh -   # cài nhưng CHƯA chạy
 
+# ⚠️ Bước 3b — nạp lại encryption config TRƯỚC khi khởi động
+sudo mkdir -p /var/lib/rancher/k3s/server/cred
+sudo install -m 600 <encryption-config.json từ recovery kit> \
+  /var/lib/rancher/k3s/server/cred/encryption-config.json
+# Bỏ bước này: cluster lên bình thường nhưng apiserver không giải mã được Secret nào.
+
 # Bước 4 — restore từ R2 (giống R5 bước 2, bản S3), rồi:
 sudo systemctl start k3s && sudo k3s kubectl get nodes
+kubectl -n kube-system get secret -o name | head -1    # đọc được → encryption config đúng
 
 # Bước 5 — 2 agent quay lại. Vì chúng trỏ vào TÊN MagicDNS nên không phải sửa gì trên agent.
 kubectl -n kube-system delete secret hnq-02.node-password.k3s hnq-03.node-password.k3s
