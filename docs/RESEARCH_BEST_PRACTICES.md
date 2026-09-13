@@ -1,31 +1,27 @@
-# Nghiên cứu: Best practice cộng đồng về k3s + ArgoCD
+# Hồ sơ nghiên cứu: best practice cộng đồng về k3s + ArgoCD
 
-| | |
-|---|---|
-| **Ngày tra cứu** | 11/09/2026 |
-| **Mục đích** | Đối chiếu kế hoạch trong [REFACTOR_PLAN.md](./REFACTOR_PLAN.md) với thực tiễn cộng đồng |
-| **Trạng thái** | ✅ Đã áp dụng vào plan — xem bảng ngay dưới |
+> **Đây là hồ sơ tra cứu, không phải kế hoạch.** Kế hoạch đang dùng là [PLAN.md](./PLAN.md) — mọi quyết định ở đó đều lấy cơ sở từ tài liệu này.
+>
+> ⚠️ **Mọi câu hỏi "cần bạn quyết định" trong tài liệu này đã được chốt** ở [PLAN §1](./PLAN.md#1-bảng-quyết-định-đã-chốt). Nếu tài liệu này và PLAN nói khác nhau thì **PLAN đúng**.
+>
+> Tra cứu ngày 11/09/2026. Các cột *"Plan hiện tại"* trong tài liệu so với **bản nháp đầu tiên** (đội 3 người, chưa chốt topology) nên có chỗ đã lỗi thời — quyết định hiện hành luôn đọc ở [PLAN §1 Bảng quyết định đã chốt](./PLAN.md#1-bảng-quyết-định-đã-chốt).
 
----
+## Bảy chỗ kế hoạch hiện tại đi khác tài liệu này — và vì sao
 
-## Trạng thái áp dụng
+Đều cùng một lý do: tài liệu này viết cho đội có nhiều người, kế hoạch viết cho **1 người vận hành**.
 
-> **Cập nhật 11/09/2026 —** [REFACTOR_PLAN.md](./REFACTOR_PLAN.md) đã được viết lại theo tài liệu này, trong bối cảnh mới: **xây mới trên server + repo GitHub mới, đội 3 người**.
+| Cộng đồng khuyến nghị | PLAN.md làm gì | Vì sao |
+|---|---|---|
+| Tắt tài khoản `admin` của ArgoCD, dùng SSO | **Giữ `admin`** | Dex/GitHub OIDC = 4 phụ thuộc phải sống mới đăng nhập được, đúng lúc đang sự cố. Bù bằng: không ingress public, chỉ vào qua tailnet, `policy.default: ""` |
+| Tailscale K8s Operator thay vì phát tán kubeconfig | **kubeconfig qua tailnet** | Bài toán Operator giải (nhiều người, nhiều máy, RBAC theo người) không tồn tại với 1 người; cái giá (một thành phần giữa bạn và apiserver) thì vẫn nguyên |
+| Backup namespace `argocd` | **Không cần** | ArgoCD ở cấu hình này không có PV — toàn bộ trạng thái là CR trong etcd, snapshot etcd đã phủ hết |
+| Longhorn cho multi-node production | **Không dùng** | Master là VPS xa nối qua WAN. Và khi Longhorn hỏng, 1 người sửa nó lâu hơn restore từ dump → tăng MTBF nhưng tăng cả MTTR |
+| HA control-plane (3 server) | **1 server** | Quorum etcd qua WAN tệ hơn 1 server: mất một đường mạng là cluster read-only dù cả 3 máy đều sống |
+| `replicas: 2` cho prod | **1 replica** cho app; 2 replica chỉ cho Traefik/cloudflared/CoreDNS | Mọi pod prod nằm cùng một node → replica thứ hai không chống được sự cố node, chỉ nhân đôi kết nối DB |
+| Require approvals trên PR | **0 approval**, CI là cửa duyệt | GitHub không cho tự approve PR của mình |
 
-| Phát hiện | Quyết định |
-|---|---|
-| Branch-per-environment là anti-pattern | ✅ **Đã theo** — chuyển sang 1 branch `main`, môi trường tách bằng file values |
-| App-of-Apps + ApplicationSet dùng chung | ✅ **Đã theo** — ApplicationSet cho service của mình, Application tường minh cho chart bên thứ ba |
-| `prune: false` ở prod | ✅ **Đã theo** |
-| Sync waves | ✅ **Đã theo** — đưa vào library chart |
-| Renovate, tắt tài khoản `admin`, Trivy, `helm-unittest`, backup namespace `argocd` | ✅ **Đã theo** — vào Tuần 1–5 |
-| Sealed Secrets → ESO là lộ trình đúng | ✅ **Giữ nguyên** |
-| Hoãn Longhorn khi node nối qua WAN | ✅ **Giữ nguyên** |
-| Kargo | ⏸ **Hoãn** — ngưỡng hữu ích là từ 3 môi trường |
-| Backstage / portal tự viết | ❌ **Bỏ** — ArgoCD UI + k9s + script đã phủ hết |
-| Sync window, NetworkPolicy, ArgoCD HA, kube-score, Progressive Sync | ❌ **Bỏ** — xem [REFACTOR_PLAN §12](./REFACTOR_PLAN.md#12-những-gì-cố-tình-không-làm) |
+Ba chủ đề **không có trong tài liệu này**, được tra cứu riêng và viết thẳng vào kế hoạch: MTTR có đo, dead man's switch, và đường dữ liệu độc lập control-plane. Xem [RECOVERY.md](./RECOVERY.md) và [OPERATIONS.md](./OPERATIONS.md).
 
-Phần vận hành hằng ngày (k9s, stern, Tailscale Operator, số lượng alert, nâng cấp k3s, backup) được tra cứu riêng và viết thành [K3S_OPERATIONS.md](./K3S_OPERATIONS.md) — nguồn nằm ở cuối tài liệu đó.
 
 ---
 
@@ -272,7 +268,7 @@ Tổng hợp từ [Red Hat](https://developers.redhat.com/articles/2022/09/07/ho
 > *"Most teams start with Sealed Secrets and graduate to ESO when they hit the multi-cluster or rotation wall."*
 > — [DevOpsBoys](https://devopsboys.com/blog/sops-vs-sealed-secrets-vs-external-secrets-gitops-2026)
 
-Quyết định Q3 của bạn (Sealed Secrets) **khớp chính xác** với khuyến nghị này. Và hạn chế mà tôi đã nêu trong [SECRET_MANAGEMENT.md](./SECRET_MANAGEMENT.md) cũng đúng với cộng đồng:
+Quyết định chọn Sealed Secrets ([PLAN §11](./PLAN.md#11-secret)) **khớp chính xác** với khuyến nghị này. Và hạn chế của nó cũng đúng với những gì cộng đồng nêu:
 
 > *"The encryption/decryption mechanism is tied to the specific Kubernetes cluster, meaning migrating secrets between clusters can be a challenge."*
 
@@ -338,11 +334,11 @@ Bạn có **2 môi trường**. Theo tiêu chí này thì **chưa tới ngưỡn
 |---|---|
 | AppProject giới hạn repo nguồn, namespace đích, cluster resource | ✅ Có (Phần 9) |
 | RBAC deny-by-default, map sang nhóm SSO | ✅ Có |
-| Tắt tài khoản mặc định (`admin`) | ➕ **Thiếu** — nên thêm vào Phase 0 |
+| Tắt tài khoản mặc định (`admin`) | 🔄 **Cố tình không làm ở v3** — với 1 người thì đổi lại bằng: không ingress public + chỉ vào qua tailnet + `policy.default: ""`. Lý do đầy đủ ở [plan §8](./PLAN.md) |
 | NetworkPolicy giới hạn truy cập mạng | ➕ **Thiếu** |
-| HA cho ArgoCD | ⚠️ Chưa — hiện 1 replica, chấp nhận được ở quy mô này |
+| HA cho ArgoCD | ❌ **Chốt không** — 1 replica, và vì không có PV nên restore etcd là ArgoCD trở lại nguyên trạng |
 | **Sync window** cho quản lý thay đổi | ➕ **Thiếu** — xem [Phần 3](#3--chính-sách-sync) |
-| Backup ArgoCD tự động | ➕ **Thiếu** — cần backup `argocd` namespace, đưa vào Velero (Phase 4) |
+| Backup ArgoCD tự động | ✅ **Đã có, theo cách khác** — etcd snapshot đã chứa toàn bộ CR của ArgoCD; không cần Velero cho namespace này vì không có PV |
 | Audit log | ✅ Lịch sử Git + audit log của ArgoCD |
 
 ### ➕ Sync waves — thiếu hẳn trong plan
@@ -376,14 +372,16 @@ Với hệ thống của bạn, cái này giải quyết một vấn đề cụ 
 
 | Thực hành cộng đồng | Plan hiện tại |
 |---|---|
-| Longhorn cho multi-node production | ✅ Có nêu, nhưng **hoãn lại** vì flannel chạy qua `tailscale0` |
-| `reclaimPolicy: Retain` cho data production | ✅ Có (Phần 11.2) |
+| Longhorn cho multi-node production | ❌ **Chốt không ở v3** — master ở VPS xa, nối 2 node local qua Tailscale. Thêm: khi Longhorn hỏng thì 1 người sửa nó lâu hơn là restore từ dump, tức là tăng MTBF nhưng tăng cả MTTR |
+| `reclaimPolicy: Retain` cho data production | ✅ Có — khai trong StorageClass `hnq-local` ([plan §10.4](./PLAN.md)) |
 | Longhorn replica count = số node (tối đa 3) | Ghi lại cho sau này |
-| **Kết hợp hợp lệ**: local-path cho cache/ít quan trọng, Longhorn cho stateful quan trọng | ✅ Đúng hướng plan đang đi |
+| **Kết hợp hợp lệ**: local-path cho cache/ít quan trọng, Longhorn cho stateful quan trọng | ⚠️ v3 chọn **local-path cho tất cả**, và bù bằng lớp dump logic hằng giờ (RPO 1 giờ) + quy trình [R4](./RECOVERY.md) đã diễn tập |
 
 > *"A production K3s environment may legitimately combine: local-path → caches and low-criticality local state, Longhorn / CSI storage → selected stateful cluster workloads."*
 
 Quyết định hoãn Longhorn trong plan là **hợp lý và có cơ sở** — replication khối qua WAN (Tailscale) sẽ chậm và dễ gây ra chính sự cố nó định phòng. Cộng đồng không phản đối cách tiếp cận lai này.
+
+> **v3 đi xa hơn một bước và chốt là không dùng Longhorn.** Lý do thêm vào không nằm trong tài liệu nghiên cứu này mà nằm ở quy mô đội: cộng đồng khuyến nghị Longhorn cho *"selected stateful cluster workloads"*, nhưng ngầm giả định có người vận hành được nó. Với 1 người, thời gian sửa Longhorn khi nó hỏng dài hơn thời gian restore từ dump — nên nó **tăng MTBF mà cũng tăng MTTR**, ngược với mục tiêu đã chọn. Xét lại khi có node local thứ ba chung LAN **và** có người thứ hai biết vận hành nó.
 
 ---
 
@@ -442,9 +440,9 @@ Công sức: ~2 giờ cấu hình. Giá trị: cao.
 | Công sức | **2 ngày** | 3,5 tuần | 2–3 tuần cấu hình |
 | Phải nuôi thêm | Không | 1 app Node + token Git + SQLite | Backstage + Postgres |
 | Xem trạng thái | ArgoCD UI (đã có sẵn) | Tự viết lại | Có plugin |
-| Phù hợp 3 người | ✅ **Khuyến nghị** | Khi có người ngoài đội cần deploy | >10 đội |
+| Phù hợp 1 người | ✅ **Khuyến nghị** | Khi có người ngoài cần deploy | >10 đội |
 
-**Quyết định: không xây portal.** ArgoCD UI đã có danh sách Application, sync/health, cây resource, log pod, diff và nút sync — tức là phần lớn thứ một portal tự viết sẽ làm lại. Khoảng trống thật duy nhất là bảng so tag dev ↔ prod, và đó là [một script 30 dòng](./K3S_OPERATIONS.md#5-makefile--lệnh-hằng-ngày).
+**Quyết định: không xây portal.** ArgoCD UI đã có danh sách Application, sync/health, cây resource, log pod, diff và nút sync — tức là phần lớn thứ một portal tự viết sẽ làm lại. Khoảng trống thật duy nhất là bảng so tag dev ↔ prod, và đó là [một script 30 dòng](./OPERATIONS.md).
 
 Thứ đáng mượn từ Backstage không phải phần mềm, mà là khái niệm **"golden path"**:
 
@@ -469,13 +467,13 @@ Nghĩa là khuôn mẫu của `make new-service` phải tạo ra thứ **đã đ
 | 9 | Sealed Secrets → ESO là lộ trình chuẩn | ✅ | 🟡 | Đã đúng |
 | 10 | Kargo cho promotion nhiều môi trường | ➕ | 🟡 | Chưa cần (2 env), ghi vào plan |
 | 11 | RBAC mặc định ArgoCD quá rộng | ✅ | 🟠 | Đã có AppProject |
-| 12 | Tắt tài khoản `admin` mặc định | ➕ | 🟠 | **Thêm vào Phase 0** |
+| 12 | Tắt tài khoản `admin` mặc định | ➕ | 🟠 | 🔄 **v3 không làm** — giữ `admin`, bù bằng không-ingress-public + tailnet-only ([plan §8](./PLAN.md)) |
 | 13 | NetworkPolicy cho ArgoCD | ➕ | 🟠 | Thêm vào Phase 3 |
-| 14 | Backup namespace `argocd` | ➕ | 🟠 | **Thêm vào Phase 4** |
+| 14 | Backup namespace `argocd` | ➕ | 🟠 | 🔄 **v3 không cần** — ArgoCD không có PV, etcd snapshot đã phủ hết |
 | 15 | Sync waves theo thứ tự phụ thuộc | ➕ | 🟠 | **Thêm vào Phase 2** (library chart) |
-| 16 | local-path chỉ hợp dev; Longhorn cho prod | ✅ | 🟢 | Đã nêu, hoãn có cơ sở |
+| 16 | local-path chỉ hợp dev; Longhorn cho prod | ✅ | 🟢 | 🔄 **v3 chốt không Longhorn** — bù bằng dump hằng giờ + [R4](./RECOVERY.md) đã diễn tập |
 | 17 | `reclaimPolicy: Retain` cho prod | ✅ | 🟢 | Đã có |
-| 18 | `helm-unittest` trong CI | ⚠️ | 🟠 | Đưa hẳn vào `.gitlab-ci.yml` |
+| 18 | `helm-unittest` trong CI | ⚠️ | 🟠 | Đưa hẳn vào `.github/workflows/validate.yml` |
 | 19 | `trivy` quét image | ➕ | 🟠 | Thêm vào Phase 0 |
 | 20 | `kube-score` | ➕ | 🟠 | Tuỳ chọn |
 | 21 | **Renovate tự nâng phiên bản chart** | ➕ | 🟠 | **Thêm vào Phase 0** — giá trị cao, công sức thấp |
