@@ -109,10 +109,6 @@ jobs:
           # Cache dùng chung để chỉ tải CSDL lỗ hổng một lần cho cả vòng lặp.
           CACHE="$RUNNER_TEMP/trivy-cache"
           mkdir -p "$CACHE"
-          # Chỉ quét image bên thứ ba; image của mình do CI của repo ứng dụng
-          # quét lúc build.
-          # --exit-code 0 là CÓ CHỦ Ý: một CVE mới trong image upstream không
-          # được phép chặn mọi PR. Đây là bước để đọc, không phải cửa chặn.
           # -N là BẮT BUỘC khi yq đọc nhiều file: không có nó, yq chèn "---"
           # giữa các kết quả và vòng lặp sẽ gọi trivy với "---" làm tên image.
           IMAGES=$(yq -N -r '.image.repository + ":" + .image.tag' \
@@ -120,9 +116,32 @@ jobs:
           # Biểu thức hỏng thì danh sách rỗng và bước này "xanh" mà không quét
           # gì cả — im lặng kiểu đó tệ hơn là đỏ.
           [ -n "$IMAGES" ] || { echo "❌ không lấy được image nào để quét"; exit 1; }
+
+          total=0
+          scanned=0
           for img in $IMAGES; do
+            total=$((total + 1))
             echo "── $img"
-            docker run --rm -v "$CACHE:/root/.cache/trivy" \
-              ghcr.io/aquasecurity/trivy:${TRIVY_VERSION} \
-              image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 --no-progress "$img"
+            # --scanners vuln: bỏ quét secret trong image, gitleaks đã lo phần
+            # secret cho repo này.
+            # --exit-code 0 là CÓ CHỦ Ý: một CVE mới trong image upstream không
+            # được phép chặn mọi PR. Đây là bước để đọc, không phải cửa chặn.
+            if docker run --rm -v "$CACHE:/root/.cache/trivy" \
+                 ghcr.io/aquasecurity/trivy:${TRIVY_VERSION} \
+                 image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+                 --exit-code 0 --no-progress "$img"; then
+              scanned=$((scanned + 1))
+            else
+              # Docker Hub giới hạn lượt tải ẩn danh từ dải IP của GitHub
+              # Actions. Đó là sự cố của dịch vụ bên ngoài, không phải lỗi
+              # trong PR — và status check là CỬA DUYỆT DUY NHẤT ở đây
+              # (PLAN §13), nên nó chập chờn là tệ hơn nhiều so với mất một
+              # lần quét.
+              echo "⚠️  không lấy được $img để quét (thường là Docker Hub giới hạn lượt tải)"
+            fi
           done
+
+          # Nhưng KHÔNG quét được cái nào thì là trivy hỏng, không phải registry
+          # chập chờn — cái đó phải đỏ.
+          [ "$scanned" -gt 0 ] || { echo "❌ không quét được image nào — trivy hỏng"; exit 1; }
+          echo "✅ đã quét $scanned/$total image"
