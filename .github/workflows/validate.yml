@@ -15,6 +15,7 @@ env:
   KUBECONFORM_VERSION: v0.6.7
   CONFTEST_VERSION: 0.56.0
   YQ_VERSION: v4.44.5
+  TRIVY_VERSION: 0.58.1
 
 jobs:
   validate:
@@ -102,10 +103,18 @@ jobs:
       - name: trivy — image trong registry/apps
         run: |
           set -euo pipefail
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sudo sh -s -- -b /usr/local/bin v0.58.1
-          # Quét image của chart bên thứ ba; image của mình do CI của repo
-          # ứng dụng quét lúc build.
+          # Chạy trivy từ image chính thức trên ghcr.io thay vì install.sh:
+          # script cài đặt lấy từ nhánh main là mục tiêu di động — nó từng đoán
+          # sai tên file release và làm đỏ CI dù không có gì hỏng trong repo.
+          # Cache dùng chung để chỉ tải CSDL lỗ hổng một lần cho cả vòng lặp.
+          CACHE="$RUNNER_TEMP/trivy-cache"
+          mkdir -p "$CACHE"
+          # Chỉ quét image bên thứ ba; image của mình do CI của repo ứng dụng
+          # quét lúc build.
+          # --exit-code 0 là CÓ CHỦ Ý: một CVE mới trong image upstream không
+          # được phép chặn mọi PR. Đây là bước để đọc, không phải cửa chặn.
           for img in $(yq -r '.image.repository + ":" + .image.tag' registry/apps/storage-*/values-dev.yaml); do
-            trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 --no-progress "$img"
+            docker run --rm -v "$CACHE:/root/.cache/trivy" \
+              ghcr.io/aquasecurity/trivy:${TRIVY_VERSION} \
+              image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 --no-progress "$img"
           done
