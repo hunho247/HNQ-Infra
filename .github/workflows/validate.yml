@@ -113,7 +113,15 @@ jobs:
           # quét lúc build.
           # --exit-code 0 là CÓ CHỦ Ý: một CVE mới trong image upstream không
           # được phép chặn mọi PR. Đây là bước để đọc, không phải cửa chặn.
-          for img in $(yq -r '.image.repository + ":" + .image.tag' registry/apps/storage-*/values-dev.yaml); do
+          # -N là BẮT BUỘC khi yq đọc nhiều file: không có nó, yq chèn "---"
+          # giữa các kết quả và vòng lặp sẽ gọi trivy với "---" làm tên image.
+          IMAGES=$(yq -N -r '.image.repository + ":" + .image.tag' \
+            registry/apps/storage-*/values-dev.yaml)
+          # Biểu thức hỏng thì danh sách rỗng và bước này "xanh" mà không quét
+          # gì cả — im lặng kiểu đó tệ hơn là đỏ.
+          [ -n "$IMAGES" ] || { echo "❌ không lấy được image nào để quét"; exit 1; }
+          for img in $IMAGES; do
+            echo "── $img"
             docker run --rm -v "$CACHE:/root/.cache/trivy" \
               ghcr.io/aquasecurity/trivy:${TRIVY_VERSION} \
               image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 --no-progress "$img"
