@@ -244,10 +244,16 @@ ssh hnq-01 'sudo systemctl restart k3s && sudo journalctl -u k3s -f --no-pager |
 sudo k3s etcd-snapshot ls
 sudo systemctl stop k3s
 
+# ⚠️ Đường dẫn snapshot là etcd-snapshot-dir đã cấu hình (nodes/hnq-01.config.yaml),
+#    KHÔNG phải mặc định /var/lib/rancher/k3s/server/db/snapshots/ — cụm này dùng
+#    /srv/k3s/snapshots. `k3s etcd-snapshot ls` ở trên in đúng đường dẫn thật.
+#
 # ⚠️ CHẠY Ở FOREGROUND. Đợi dòng "Managed etcd cluster membership has been reset,
 #    restart without --cluster-reset flag now" rồi Ctrl-C. Đừng để nó chạy tiếp.
+#    (Đo thực tế trên v1.36.4+k3s1: tiến trình tự thoát ngay sau dòng log đó,
+#    không cần Ctrl-C — nhưng vẫn đứng chờ, đừng giả định nó luôn tự thoát.)
 sudo k3s server --cluster-reset \
-  --cluster-reset-restore-path=/var/lib/rancher/k3s/server/db/snapshots/<tên>
+  --cluster-reset-restore-path=/srv/k3s/snapshots/<tên>
 
 sudo systemctl start k3s && kubectl get nodes
 ```
@@ -465,12 +471,14 @@ Con số ở đầu mỗi quy trình là **mục tiêu**, không phải sự th�
 
 | Quy trình | Khi nào | Mục tiêu | Đo thực tế | Lần gần nhất |
 |---|---|---|---|---|
-| [R5](#r5--etcd-hỏng-hoặc-apiserver-không-lên) restore etcd | **P0** (cluster còn trống) + hằng quý | 10 phút | _chưa đo_ | — |
+| [R5](#r5--etcd-hỏng-hoặc-apiserver-không-lên) restore etcd | **P0** (cluster còn trống) + hằng quý | 10 phút | 53 giây¹ | 2026-09-16 |
 | [R6](#r6--vps-mất-hoàn-toàn) master mới | **P0** + 6 tháng | 45 phút | _chưa đo_ | — |
 | [R7](#r7--xoá-nhầm-dữ-liệu-trong-database) restore database | **P5** + hằng quý | 15 phút | _chưa đo_ | — |
 | [R4](#r4--node-prod-chết) dời node prod | **P6** + 6 tháng | 30 phút | _chưa đo_ | — |
 | Sealing key | Hằng quý | 10 phút | _chưa đo_ | — |
 | [R8](#r8--mất-toàn-bộ-cluster) dựng lại từ 0 | 1 năm, dùng `letsencrypt-staging` | 3 giờ | _chưa đo_ | — |
+
+¹ Đo lúc cluster **chỉ có 1 node** (chưa có `hnq-02`/`hnq-03`) — không có bước "Node password rejected" (R5 bước 3) vì chưa có agent nào phải rejoin. Mục tiêu 10 phút giữ nguyên cho topology 3 node đầy đủ; đo lại con số này sau khi worker join lần đầu.
 
 **Năm quy tắc diễn tập:**
 
