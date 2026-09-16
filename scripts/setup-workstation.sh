@@ -6,9 +6,11 @@ set -euo pipefail
 
 HELM_VERSION="${HELM_VERSION:-v3.16.4}"
 K9S_VERSION="${K9S_VERSION:-v0.32.7}"
-STERN_VERSION="${STERN_VERSION:-1.31.0}"
+STERN_VERSION="${STERN_VERSION:-1.34.0}"
 YQ_VERSION="${YQ_VERSION:-v4.44.5}"
-KUBESEAL_VERSION="${KUBESEAL_VERSION:-0.27.3}"
+# kubeseal phải cùng minor version với controller (chart sealed-secrets ghim
+# appVersion 0.40.x — xem gitops/bootstrap/platform/sealed-secrets.yaml).
+KUBESEAL_VERSION="${KUBESEAL_VERSION:-0.40.0}"
 BIN="${BIN:-$HOME/.local/bin}"
 
 mkdir -p "$BIN"
@@ -34,8 +36,9 @@ install_kubectl
 install_tar helm  "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz" linux-amd64/helm
 # k9s: thay ~80% lệnh kubectl gõ hằng ngày. Thứ mở đầu tiên trong mọi sự cố.
 install_tar k9s   "https://github.com/derailed/k9s/releases/download/$K9S_VERSION/k9s_Linux_amd64.tar.gz" k9s
-install_tar stern "https://github.com/stern/stern/releases/download/v$STERN_VERSION/stern_${STERN_VERSION}_linux_amd64.tar.gz" "stern_${STERN_VERSION}_linux_amd64/stern"
-install_tar kubeseal "https://github.com/bitnami-labs/sealed-secrets/releases/download/v$KUBESEAL_VERSION/kubeseal-$KUBESEAL_VERSION-linux-amd64.tar.gz" kubeseal
+install_tar stern "https://github.com/stern/stern/releases/download/v$STERN_VERSION/stern_${STERN_VERSION}_linux_amd64.tar.gz" stern
+# bitnami-labs/sealed-secrets đã đổi thành bitnami/sealed-secrets.
+install_tar kubeseal "https://github.com/bitnami/sealed-secrets/releases/download/v$KUBESEAL_VERSION/kubeseal-$KUBESEAL_VERSION-linux-amd64.tar.gz" kubeseal
 
 have yq || { curl -sfL "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/yq_linux_amd64" -o "$BIN/yq"; chmod +x "$BIN/yq"; }
 
