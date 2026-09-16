@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tunnel-test-nginx-conf
+data:
+  default.conf: |
+    server {
+      listen {{ .Values.port }} ssl;
+      ssl_certificate     /etc/nginx/tls/tls.crt;
+      ssl_certificate_key /etc/nginx/tls/tls.key;
+      location / {
+        return 200 "{{ .Values.message }}\n";
+      }
+    }

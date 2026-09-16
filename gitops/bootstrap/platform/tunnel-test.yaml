@@ -1,0 +1,22 @@
+# DEMO — không phải service thật. Test đường Internet → Cloudflare Tunnel
+# (cloudflared chạy systemd trên hnq-01, route sẵn có
+# server01.l2cteam.work -> https://localhost:10000) → k3s, lúc chưa có worker.
+# Xoá Application này + thư mục ../../manifests/tunnel-test-chart khi không
+# còn cần demo.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tunnel-test
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/hunho247/HNQ-Infra.git
+    targetRevision: main
+    path: gitops/manifests/tunnel-test-chart
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tunnel-test
+  syncPolicy:
+    automated: { selfHeal: true, prune: true }
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]

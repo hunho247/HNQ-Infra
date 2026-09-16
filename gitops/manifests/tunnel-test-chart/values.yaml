@@ -1,0 +1,10 @@
+image:
+  repository: nginx
+  tag: "1.27-alpine"
+port: 10000
+message: "ok from k3s test pod on hnq-01"
+nodeSelector:
+  hnq.dev/role: control-plane
+resources:
+  requests: { cpu: 10m, memory: 32Mi }
+  limits: { cpu: 100m, memory: 64Mi }

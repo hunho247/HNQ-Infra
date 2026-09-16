@@ -1,0 +1,12 @@
+# Chart demo: test kết nối Internet → Cloudflare Tunnel → k3s, không phải
+# service thật. Dùng khi chưa có worker nên KHÔNG qua đường webservice chuẩn
+# (nodeSelector env-dev/env-prod, Traefik+cert-manager) — pod này chạy thẳng
+# trên control-plane qua hostPort để khớp route sẵn có
+# server01.l2cteam.work -> https://localhost:10000 trên cloudflared (host).
+#
+# Xoá khi không còn cần: gitops/bootstrap/platform/tunnel-test.yaml +
+# thư mục này.
+apiVersion: v2
+name: tunnel-test
+description: Demo pod test đường Cloudflare Tunnel -> k3s (tạm thời, xoá được)
+version: 0.1.0
