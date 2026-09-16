@@ -14,9 +14,12 @@ spec:
       namespace: '*-dev'
     - server: https://kubernetes.default.svc
       namespace: '*-prod'
-  # Rỗng có chủ ý: một chart app không bao giờ cần ClusterRole hay CRD.
-  # Cần thật thì đó là việc của project platform, và phải có người đọc PR.
-  clusterResourceWhitelist: []
+  # Chỉ cho Namespace (ArgoCD >=3.x đòi hỏi quyền này để CreateNamespace=true
+  # chạy được) — không cho ClusterRole hay CRD. Cần thật thì đó là việc của
+  # project platform, và phải có người đọc PR.
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
   namespaceResourceBlacklist:
     - group: ''
       kind: ResourceQuota
