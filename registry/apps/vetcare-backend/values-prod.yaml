@@ -1,0 +1,45 @@
+# vetcare-backend — prod. CHƯA hoạt động: service.yaml chỉ khai "- env: dev"
+# (cửa chặn 2, PLAN §16 — bật sau khi P5 xong). Giữ file này để `make promote`
+# chỉ cần sửa tag + gỡ ghi chú trên, không phải viết lại từ đầu.
+image:
+  repository: ghcr.io/hunho247/vetcare-backend
+  tag: "CHANGEME" # make promote NAME=vetcare-backend ghi tag đã kiểm chứng ở dev vào đây
+
+imagePullSecrets:
+  - name: vetcare-backend-registry
+
+containerPort: 8080
+probePath: /healthz
+
+ingress:
+  host: vetcare-backend.l2cteam.work
+
+app:
+  secretName: vetcare-backend-backend
+  env:
+    - name: HTTP_ADDR
+      value: ":8080"
+    - name: APP_ENV
+      value: "prod"
+    - name: POSTGRES_HOST
+      value: "storage-postgres.storage-postgres-prod"
+    - name: POSTGRES_PORT
+      value: "5432"
+    - name: POSTGRES_DB
+      value: "vetcare"
+    - name: APP_DB_USER
+      value: "app_user"
+    - name: ADMIN_DB_USER
+      value: "admin_bypass"
+    - name: IDENTITY_DB_USER
+      value: "identity_user"
+    - name: MIGRATION_DB_USER
+      value: "migration_owner"
+    - name: MINIO_ENDPOINT
+      value: "storage-minio-api-prod.l2cteam.work"
+    - name: MINIO_USE_SSL
+      value: "true"
+    - name: MINIO_BUCKET
+      value: "vetcare-backend"
+    - name: PUBLIC_BASE_URL
+      value: "https://vetcare-backend.l2cteam.work"

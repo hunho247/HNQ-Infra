@@ -1,0 +1,53 @@
+# vetcare-backend — dev. Chỉ ghi phần KHÁC mặc định của charts/webservice/values.yaml
+# và /env/dev.yaml.
+#
+# App đọc cấu hình thuần qua biến môi trường (không có config.yaml, xem
+# registry/apps/vetcare-backend/service.yaml). Giá trị không nhạy cảm (host,
+# port, tên user) khai thẳng ở app.env; mật khẩu + MinIO key nằm trong Secret
+# vetcare-backend-backend (envFrom — xem service.yaml).
+image:
+  repository: ghcr.io/hunho247/vetcare-backend
+  tag: "841f1d2" # commit vetcare-backend thêm Dockerfile — GitHub Actions build-push.yml đang đẩy lên ghcr.io
+
+imagePullSecrets:
+  - name: vetcare-backend-registry
+
+containerPort: 8080
+probePath: /healthz
+
+ingress:
+  host: vetcare-backend-dev.l2cteam.work
+
+app:
+  secretName: vetcare-backend-backend
+  env:
+    - name: HTTP_ADDR
+      value: ":8080"
+    - name: APP_ENV
+      value: "dev"
+    # Postgres — instance dùng chung storage-postgres, database riêng "vetcare".
+    # 4 role tách bạch bootstrap bằng internal/platform/db/roles.sql (make roles),
+    # chạy tay một lần trước khi service này chạy được (xem PLAN §11 / README triển khai).
+    - name: POSTGRES_HOST
+      value: "storage-postgres.storage-postgres-dev"
+    - name: POSTGRES_PORT
+      value: "5432"
+    - name: POSTGRES_DB
+      value: "vetcare"
+    - name: APP_DB_USER
+      value: "app_user"
+    - name: ADMIN_DB_USER
+      value: "admin_bypass"
+    - name: IDENTITY_DB_USER
+      value: "identity_user"
+    - name: MIGRATION_DB_USER
+      value: "migration_owner"
+    # MinIO — instance dùng chung storage-minio, bucket riêng "vetcare-backend".
+    - name: MINIO_ENDPOINT
+      value: "storage-minio-api-dev.l2cteam.work"
+    - name: MINIO_USE_SSL
+      value: "true"
+    - name: MINIO_BUCKET
+      value: "vetcare-backend"
+    - name: PUBLIC_BASE_URL
+      value: "https://vetcare-backend-dev.l2cteam.work"

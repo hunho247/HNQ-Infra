@@ -1,0 +1,27 @@
+apiVersion: hnq.dev/v1
+kind: ServiceRelease
+metadata:
+  name: vetcare-backend
+spec:
+  category: app
+  chart: webservice
+  # App đọc cấu hình thuần qua biến môi trường (không có file cấu hình riêng).
+  config: false
+  environments:
+    # Thêm "- env: prod" khi service đã chạy ổn ở dev (PLAN §14, cửa chặn 2).
+    - env: dev
+  requiredSecrets:
+    # 4 role Postgres tách bạch (RLS — internal/platform/db/roles.sql của app)
+    # + MinIO access key riêng của service (không dùng chung root MinIO).
+    - name: vetcare-backend-backend
+      keys:
+        [
+          APP_DB_PASSWORD,
+          ADMIN_DB_PASSWORD,
+          IDENTITY_DB_PASSWORD,
+          MIGRATION_DB_PASSWORD,
+          MINIO_ACCESS_KEY,
+          MINIO_SECRET_KEY,
+        ]
+    - name: vetcare-backend-registry
+      keys: [.dockerconfigjson]

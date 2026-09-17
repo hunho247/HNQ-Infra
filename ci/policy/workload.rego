@@ -54,7 +54,7 @@ deny contains msg if {
 # Image của mình phải là git SHA. PLAN §4 viết 7 ký tự; chấp nhận 7–40 để dùng
 # được luôn tag 8 ký tự mà CI hiện tại đang sinh — điều quan trọng là SHA, không
 # phải độ dài.
-own_registry_prefixes := ["ghcr.io/hnq-tech/", "registry.gitlab.com/hnq-tech/", "registry.gitlab.com/lifetocode/"]
+own_registry_prefixes := ["ghcr.io/hnq-tech/", "ghcr.io/hunho247/", "registry.gitlab.com/hnq-tech/", "registry.gitlab.com/lifetocode/"]
 
 # Ngoại lệ SHA — mỗi dòng là một món nợ nhìn thấy được, không phải một ngoại
 # lệ im lặng. Bỏ dòng đi ngay khi pipeline của repo đó gắn tag SHA.
