@@ -12,7 +12,9 @@ spec:
     - env: dev
   requiredSecrets:
     # 4 role Postgres tách bạch (RLS — internal/platform/db/roles.sql của app)
-    # + MinIO access key riêng của service (không dùng chung root MinIO).
+    # + MinIO access key riêng của service (không dùng chung root MinIO)
+    # + secret auth (D2, xem docs/features/260722_jwt_signing_key_setup_guide.md
+    # của vetcare-backend): app fail-loud lúc boot nếu thiếu bất kỳ key nào dưới.
     - name: vetcare-backend-backend
       keys:
         [
@@ -22,6 +24,10 @@ spec:
           MIGRATION_DB_PASSWORD,
           MINIO_ACCESS_KEY,
           MINIO_SECRET_KEY,
+          AUTH_JWT_SIGNING_KEY_SEED,
+          AUTH_OAUTH_COOKIE_KEY,
+          AUTH_2FA_ENC_KEY,
+          GOOGLE_OAUTH_CLIENT_SECRET,
         ]
     - name: vetcare-backend-registry
       keys: [.dockerconfigjson]

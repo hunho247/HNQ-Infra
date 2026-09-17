@@ -51,3 +51,14 @@ app:
       value: "vetcare-backend"
     - name: PUBLIC_BASE_URL
       value: "https://vetcare-backend-dev.l2cteam.work"
+    # Auth (D2) — kid không nhạy cảm (chỉ khớp 1 row auth.signing_keys), seed thì có
+    # (nằm trong Secret). Client ID/redirect URI Google OAuth cũng không nhạy cảm
+    # (thường lộ ở frontend); CLIENT_SECRET nằm trong Secret.
+    - name: AUTH_JWT_SIGNING_KID
+      value: "dev-1"
+    - name: GOOGLE_OAUTH_CLIENT_ID
+      value: "CHANGEME"
+    - name: GOOGLE_OAUTH_REDIRECT_URI
+      value: "https://vetcare-backend-dev.l2cteam.work/v1/auth/oauth/google/callback"
+    - name: FIREBASE_PROJECT_ID
+      value: "CHANGEME"

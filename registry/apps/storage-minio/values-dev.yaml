@@ -1,7 +1,9 @@
 # storage-minio — dev
 # Chỉ ghi phần KHÁC mặc định của charts/datastore/values.yaml và /env/dev.yaml.
+# docker.io/minio/minio giờ yêu cầu auth (MinIO đổi chính sách phân phối 2025) —
+# dùng bản mirror công khai trên quay.io, cùng tag.
 image:
-  repository: docker.io/minio/minio
+  repository: quay.io/minio/minio
   tag: "RELEASE.2025-04-22T22-12-26Z"
 
 port: 9000
