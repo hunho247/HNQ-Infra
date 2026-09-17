@@ -3,3 +3,4 @@ charts/*/charts/*.tgz
 kubeconfig*
 .DS_Store
 .render/
+.repo/*
