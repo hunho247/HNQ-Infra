@@ -32,9 +32,13 @@ spec:
                 paths: ["/srv/k3s/data"]
               - node: hnq-03
                 paths: ["/srv/k3s/data"]
-              # paths rỗng = từ chối cấp volume trên master.
+              # TẠM THỜI (xem project memory "vetcare-backend tạm chạy 1 node"):
+              # hnq-02/hnq-03 chưa join, nên hnq-01 tạm được cấp path thật để
+              # storage-postgres/storage-minio dev có chỗ chạy. Trả về paths: []
+              # (từ chối cấp volume trên master) ngay khi hnq-02/hnq-03 join thật
+              # và dữ liệu đã di chuyển sang node nhà.
               - node: hnq-01
-                paths: []
+                paths: ["/srv/k3s/data"]
         nodeSelector:
           hnq.dev/role: control-plane
         tolerations:
