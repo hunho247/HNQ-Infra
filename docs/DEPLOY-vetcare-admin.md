@@ -17,19 +17,28 @@ Cấu hình runtime chỉ có 2 biến: `API_BASE_URL` (không nhạy cảm, kha
 và `AUTH_SECRET` (SealedSecret). Backend được gọi qua Service trong cluster
 (`http://vetcare-backend.vetcare-backend-dev.svc.cluster.local`) — không đi vòng ra Cloudflare.
 
-## 2. Đã chuẩn bị sẵn (CHƯA commit/push gì)
+## 2. Trạng thái: ĐÃ CHẠY (dev), 2026-09-19
 
-**Repo `.repo/vetcare-admin`**
-- `next.config.ts`: thêm `output: 'standalone'`.
-- `Dockerfile`, `.dockerignore`, `.github/workflows/build-push.yml` (tag = 7 ký tự SHA, như backend).
-- Đã thử: `next build` OK, chạy `node server.js` với `NODE_ENV=production` → `/login` 200, các
-  trang khác 307 → `/login`, static 200. (Chưa build được image thật vì máy này không có Docker —
-  GitHub Actions sẽ là lần build image đầu tiên.)
+`https://vetcare-admin-dev.l2cteam.work/login` trả **200**. Image đang chạy:
+`ghcr.io/hunho247/vetcare-admin:aef6099`.
 
-**Repo HNQ-Infra**
-- `registry/apps/vetcare-admin/{service.yaml,values-dev.yaml,values-prod.yaml}`.
-- `secrets/PENDING`: thêm dòng `vetcare-admin/dev` (nợ có chủ ý cho tới khi niêm phong xong).
-- CI gates cục bộ (schema, render, conftest 1185/1185) đều qua với file mới.
+Đã kiểm chứng bằng lệnh thật, không phải suy đoán:
+
+| Kiểm chứng | Kết quả |
+|---|---|
+| Pod | `Running 1/1`, log Next.js `✓ Ready` |
+| Qua Traefik (`--resolve` ClusterIP) | `/login` 200, `/` 307 → `/login` |
+| Qua Cloudflare (public) | `/login` 200, HTTP/2 |
+| Pod → backend trong cluster | `GET /healthz` 200 |
+| Server Action qua proxy | Origin hợp lệ **đi lọt**; origin giả bị chặn đúng (`x-forwarded-host` khớp) |
+
+Nghĩa là **không cần** thêm host vào `serverActions.allowedOrigins` — Cloudflare và Traefik
+truyền `x-forwarded-host` đúng.
+
+Thay đổi đã commit:
+- Repo vetcare-admin (`aef6099`): `output: 'standalone'` + `Dockerfile` + `.dockerignore` +
+  `.github/workflows/build-push.yml`.
+- HNQ-Infra (`48648d0`, `3c66a7a`): `registry/apps/vetcare-admin/`, 2 SealedSecret, tài liệu này.
 
 ## 3. Các bước, theo đúng thứ tự
 
@@ -130,7 +139,10 @@ thấy form đăng nhập.
 | **502** (lúc được lúc không) | URL route dùng tên chỉ phân giải trong cluster → sửa thành ClusterIP |
 | **404** từ Traefik | Ingress chưa có (Application chưa sync) hoặc ô *HTTP Host Header* bị ghi đè |
 | **1016 / không phân giải DNS** | Route chưa lưu, hoặc bản ghi DNS chưa tạo |
-| Pod `ImagePullBackOff` | Tag sai / secret `vetcare-admin-registry` sai / package ghcr chưa cho phép |
+| Pod `ImagePullBackOff` + sự kiện `FailedToRetrieveImagePullSecret` | **Chưa áp SealedSecret** (Bước 2) — đây là lỗi đã gặp thật lần đầu deploy |
+| Pod `ImagePullBackOff`, log nói `manifest unknown` | Tag chưa có trên ghcr (CI chưa build xong / build lỗi) |
+| Application `OutOfSync`, chỉ có Deployment mà **chưa có Service/Ingress** | ArgoCD dừng ở "waiting for healthy state of Deployment" vì pod chưa chạy. Sửa được gốc (pull secret) là Service/Ingress tự được tạo — không phải lỗi riêng |
+| Trang trả `404 page not found` nền đen | 404 của **Traefik**: request đã qua Cloudflare + tunnel nhưng chưa có Ingress nào khớp Host |
 | Pod `CrashLoop`, log "Thiếu biến môi trường AUTH_SECRET" | Secret `vetcare-admin-app` chưa được giải mã (sai namespace/tên khi seal) |
 | Đăng nhập xong bị đá về `/login` liên tục | Cookie phiên `Secure` (production) cần HTTPS — chỉ vào qua `https://`, không qua HTTP/IP |
 | Bấm nút báo `Invalid Server Actions request` | Origin ≠ Host phía app; thêm host vào `serverActions.allowedOrigins` ở `next.config.ts` (hiện chưa cần, chỉ thêm nếu gặp lỗi) |

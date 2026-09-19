@@ -4,6 +4,11 @@ rules:
   line-length:
     max: 120
     allow-non-breakable-words: true
+    # encryptedData của SealedSecret là base64 một dòng, luôn dài hơn 120 và
+    # không xuống dòng được. Các luật yamllint khác vẫn áp dụng cho secrets/;
+    # nội dung thì check-secrets.sh kiểm (namespace, tên, danh sách khoá).
+    ignore: |
+      secrets/
   comments:
     min-spaces-from-content: 1
   truthy:
@@ -26,3 +31,6 @@ ignore: |
   .render/
   # Cây cũ, giữ để tra cứu cho tới khi migrate xong (xem registry/README.md).
   infra/
+  # Repo ứng dụng checkout để tra cứu (.gitignore: .repo/*) — YAML của chúng
+  # thuộc CI của chính repo đó, không phải bề mặt YAML của HNQ-Infra.
+  .repo/
