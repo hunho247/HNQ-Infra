@@ -38,6 +38,11 @@ spec:
           args:
             - tunnel
             - --no-autoupdate
+            # Token-mode không có config.yaml nên phải tự mở metrics ra pod IP,
+            # nếu không cloudflared nghe 127.0.0.1:<port ngẫu nhiên> và probe
+            # /ready trên :2000 bị từ chối → liveness kill pod liên tục.
+            - --metrics
+            - 0.0.0.0:2000
             - run
           env:
             - name: TUNNEL_TOKEN
