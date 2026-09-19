@@ -1,27 +1,3 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: cloudflared
-  namespace: cloudflared
-data:
-  config.yaml: |
-    # ⚠️ Chạy bằng credentials-file, KHÔNG bằng TUNNEL_TOKEN.
-    # Với token, cloudflared lấy cấu hình ingress từ dashboard Cloudflare và
-    # bỏ qua file này — rule catch-all của D18 sẽ không có tác dụng, mà lại
-    # không báo lỗi. Credentials file giữ nguồn sự thật ở Git.
-    # Secret cloudflared-credentials: một khoá credentials.json, lấy từ
-    #   cloudflared tunnel create hnq   (file ~/.cloudflared/<UUID>.json)
-    tunnel: hnq
-    credentials-file: /etc/cloudflared/creds/credentials.json
-    metrics: 0.0.0.0:2000
-    no-autoupdate: true
-    ingress:
-      # Một rule catch-all (D18): catch-all không khớp SNI được, và hop này
-      # nằm trong cluster — link giữa node đã là WireGuard của Tailscale.
-      - service: https://traefik.kube-system.svc.cluster.local:443
-        originRequest:
-          noTLSVerify: true
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -51,12 +27,24 @@ spec:
       containers:
         - name: cloudflared
           image: docker.io/cloudflare/cloudflared:2024.12.2
+          # LỆCH KHỎI D18 (docs/PLAN.md) — TẠM THỜI (2026-09-17): tunnel
+          # "tunnel-server01" được tạo qua Cloudflare Zero Trust dashboard
+          # (token-based), không phải CLI + credentials-file như D18 định.
+          # Token method: cloudflared lấy TOÀN BỘ ingress route từ dashboard,
+          # bỏ qua mọi config.yaml trong repo — mỗi hostname mới (kể cả đổi
+          # sang route Traefik catch-all) phải thêm tay trên dashboard, không
+          # còn "1 nơi sự thật là Git" nữa. Xem project memory
+          # "cloudflared-token-based-deviation" trước khi đụng vào file này.
           args:
             - tunnel
-            - --config
-            - /etc/cloudflared/config.yaml
             - --no-autoupdate
             - run
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cloudflared-token
+                  key: token
           ports:
             - name: metrics
               containerPort: 2000
@@ -79,20 +67,6 @@ spec:
             limits:
               cpu: 300m
               memory: 256Mi
-          volumeMounts:
-            - name: config
-              mountPath: /etc/cloudflared
-              readOnly: true
-            - name: creds
-              mountPath: /etc/cloudflared/creds
-              readOnly: true
-      volumes:
-        - name: config
-          configMap:
-            name: cloudflared
-        - name: creds
-          secret:
-            secretName: cloudflared-credentials
 ---
 apiVersion: v1
 kind: Service
