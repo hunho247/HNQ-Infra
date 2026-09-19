@@ -26,6 +26,11 @@ ingress:
     - name: api
       host: storage-minio-api-dev.l2cteam.work
       port: 9000
+    # Host đi qua Cloudflare Tunnel (tunnel-server01). Host "api" ở trên có bản
+    # ghi DNS A trỏ thẳng IP server, không qua tunnel nên tạo host riêng.
+    - name: api-server1
+      host: server1-storage-minio-api-dev.l2cteam.work
+      port: 9000
 
 command: ["minio"]
 args: ["server", "/data", "--console-address", ":9001"]
