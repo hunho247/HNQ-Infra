@@ -60,12 +60,21 @@ kubectl -n vetcare-backend-dev get secret vetcare-backend-registry -o json \
 (Cách khác cho (b): đặt package `vetcare-admin` trên ghcr thành *public* rồi bỏ `imagePullSecrets` +
 secret `vetcare-admin-registry`.)
 
+> ⚠️ **ArgoCD KHÔNG áp thư mục `secrets/`** (Application chỉ render chart). SealedSecret phải áp tay
+> vào cluster — giống cách secret của vetcare-backend đã được đưa vào. Thiếu bước này pod sẽ
+> `ImagePullBackOff` với sự kiện `FailedToRetrieveImagePullSecret`. Namespace do ArgoCD tạo
+> (`CreateNamespace=true`) nên áp sau khi Application đã sync lần đầu:
+>
+> ```bash
+> kubectl apply -f secrets/dev/vetcare-admin/
+> ```
+
 ### Bước 3 — Chốt tag rồi merge HNQ-Infra
 1. Sửa `registry/apps/vetcare-admin/values-dev.yaml`: `tag: "0000000"` → `<sha7>` ở bước 1.
 2. Xoá dòng `vetcare-admin/dev` khỏi `secrets/PENDING`.
 3. `make validate` (nếu yamllint kêu vì `node_modules` trong `.repo/`, chạy từng cửa như ở §2 hoặc xoá `.repo/vetcare-admin/node_modules`).
 4. Commit + PR + merge vào `main`. ApplicationSet tự sinh Application `vetcare-admin-dev`
-   (git generator poll vài phút một lần, không có webhook).
+   (git generator poll vài phút một lần, không có webhook). Sau đó áp SealedSecret (khung ⚠️ ở trên).
 
 ```bash
 kubectl -n argocd get app vetcare-admin-dev          # Synced / Healthy
