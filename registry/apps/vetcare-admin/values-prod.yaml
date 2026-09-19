@@ -1,0 +1,20 @@
+# vetcare-admin — prod. CHƯA hoạt động: service.yaml chỉ khai "- env: dev"
+# (cửa chặn 2, PLAN §16). Giữ file này để `make promote` chỉ cần sửa tag + gỡ ghi chú.
+image:
+  repository: ghcr.io/hunho247/vetcare-admin
+  tag: "CHANGEME" # make promote NAME=vetcare-admin ghi tag đã kiểm chứng ở dev vào đây
+
+imagePullSecrets:
+  - name: vetcare-admin-registry
+
+containerPort: 8080
+probePath: /login
+
+ingress:
+  host: vetcare-admin.l2cteam.work
+
+app:
+  secretName: vetcare-admin-app
+  env:
+    - name: API_BASE_URL
+      value: "http://vetcare-backend.vetcare-backend-prod.svc.cluster.local"

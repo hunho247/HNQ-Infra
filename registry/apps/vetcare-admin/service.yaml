@@ -1,0 +1,19 @@
+apiVersion: hnq.dev/v1
+kind: ServiceRelease
+metadata:
+  name: vetcare-admin
+spec:
+  category: app
+  chart: webservice
+  # App đọc cấu hình thuần qua biến môi trường (API_BASE_URL, AUTH_SECRET).
+  config: false
+  environments:
+    # Thêm "- env: prod" khi service đã chạy ổn ở dev (PLAN §14, cửa chặn 2).
+    - env: dev
+  requiredSecrets:
+    # AUTH_SECRET: base64 của đúng 32 byte — khoá mã hoá cookie phiên (JWE). Đổi giá trị
+    # này là mọi phiên đang đăng nhập bị đăng xuất.
+    - name: vetcare-admin-app
+      keys: [AUTH_SECRET]
+    - name: vetcare-admin-registry
+      keys: [.dockerconfigjson]

@@ -1,0 +1,27 @@
+# vetcare-admin — dev. Chỉ ghi phần KHÁC mặc định của charts/webservice/values.yaml
+# và /env/dev.yaml.
+#
+# Next.js chạy server (SSR + Server Action) — image build từ Dockerfile ở repo vetcare-admin,
+# GitHub Actions build-push.yml đẩy lên ghcr.io với tag = 7 ký tự git SHA.
+image:
+  repository: ghcr.io/hunho247/vetcare-admin
+  tag: "aef6099"
+
+imagePullSecrets:
+  - name: vetcare-admin-registry
+
+containerPort: 8080
+# /login là trang tĩnh, không cần phiên (middleware cho qua) → trả 200 khi app còn sống.
+# Các đường khác đều 307 về /login khi chưa có cookie.
+probePath: /login
+
+ingress:
+  host: vetcare-admin-dev.l2cteam.work
+
+app:
+  secretName: vetcare-admin-app
+  env:
+    # Gọi backend qua Service trong cluster (Server Component/Server Action chạy trong pod,
+    # không qua browser) — không phụ thuộc Cloudflare, không đi vòng ra internet.
+    - name: API_BASE_URL
+      value: "http://vetcare-backend.vetcare-backend-dev.svc.cluster.local"
